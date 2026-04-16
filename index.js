@@ -48,7 +48,7 @@ client.on('ready', () => {
 
 // ===== PANEL =====
 client.on('messageCreate', async (msg) => {
-  if (msg.content === '/panel') {
+ if (msg.content === '/menu') {
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId('benhvien')
