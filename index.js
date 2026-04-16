@@ -1,12 +1,5 @@
-const { 
-  Client, 
-  GatewayIntentBits, 
-  ActionRowBuilder, 
-  ButtonBuilder, 
-  ButtonStyle 
-} = require('discord.js');
-
-const sqlite3 = require('sqlite3').verbose();
+const { Client, GatewayIntentBits } = require('discord.js');
+const Database = require('better-sqlite3');
 
 const TOKEN = process.env.TOKEN;
 
@@ -18,220 +11,125 @@ const client = new Client({
   ]
 });
 
-const db = new sqlite3.Database('./data.db');
-const pending = {};
+const db = new Database('data.db');
 
-// ===== DATABASE =====
-db.serialize(() => {
-  db.run(`CREATE TABLE IF NOT EXISTS shifts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT,
-    start_time INTEGER,
-    end_time INTEGER,
-    duration INTEGER,
-    start_img TEXT,
-    end_img TEXT
-  )`);
+// ===== TẠO BẢNG =====
+db.prepare(`CREATE TABLE IF NOT EXISTS shifts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT,
+  start_time INTEGER,
+  end_time INTEGER,
+  duration INTEGER,
+  start_img TEXT,
+  end_img TEXT
+)`).run();
 
-  db.run(`CREATE TABLE IF NOT EXISTS users (
-    user_id TEXT PRIMARY KEY,
-    game_id TEXT,
-    role TEXT,
-    rate INTEGER
-  )`);
-});
+db.prepare(`CREATE TABLE IF NOT EXISTS users (
+  user_id TEXT PRIMARY KEY,
+  game_id TEXT,
+  role TEXT,
+  rate INTEGER
+)`).run();
 
-// ===== FORMAT =====
+// ===== FORMAT TIME =====
 function formatTime(ms) {
-  const m = Math.floor(ms / 60000);
-  const h = Math.floor(m / 60);
-  const min = m % 60;
-  return `${h} giờ ${min} phút`;
+  const minutes = Math.floor(ms / 60000);
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${h} giờ ${m} phút`;
 }
 
-// ===== READY =====
 client.on('ready', () => {
-  console.log("🚀 Bot chạy OK");
+  console.log('✅ Bot đã sẵn sàng');
 });
 
-// ===== MENU =====
-client.on('messageCreate', async (msg) => {
-  if (msg.content === '/menu') {
-
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId('start')
-        .setLabel('🟢 Vào ca')
-        .setStyle(ButtonStyle.Success),
-
-      new ButtonBuilder()
-        .setCustomId('end')
-        .setLabel('🔴 Kết thúc')
-        .setStyle(ButtonStyle.Danger)
-    );
-
-    msg.reply({
-      content: '📌 Bấm nút:',
-      components: [row]
-    });
-  }
-});
-
-// ===== BUTTON =====
-client.on('interactionCreate', async (interaction) => {
-  if (!interaction.isButton()) return;
-
-  const userId = interaction.user.id;
-
-  if (interaction.customId === 'start') {
-    pending[userId] = 'start';
-    interaction.reply({ content: '📸 Gửi ảnh để vào ca!', ephemeral: true });
-  }
-
-  if (interaction.customId === 'end') {
-    pending[userId] = 'end';
-    interaction.reply({ content: '📸 Gửi ảnh để kết thúc!', ephemeral: true });
-  }
-});
-
-// ===== MESSAGE =====
 client.on('messageCreate', async (msg) => {
   if (msg.author.bot) return;
 
-  const userId = msg.author.id;
-
   // ===== ĐĂNG KÝ =====
   if (msg.content.startsWith('/dangky')) {
-
     const args = msg.content.split('|');
 
     if (args.length < 3) {
-      return msg.reply(`/dangky id | chucvu | tien`);
+      return msg.reply('/dangky id | chucvu | sotien');
     }
 
     const gameId = args[0].replace('/dangky', '').trim();
     const role = args[1].trim();
     const rate = parseInt(args[2]);
 
-    db.run(`INSERT OR REPLACE INTO users VALUES (?, ?, ?, ?)`,
-      [userId, gameId, role, rate]);
+    db.prepare(`INSERT OR REPLACE INTO users VALUES (?, ?, ?, ?)`)
+      .run(msg.author.id, gameId, role, rate);
 
-    return msg.reply('✅ Đăng ký xong');
+    msg.reply('✅ Đăng ký thành công');
   }
 
-  // ===== XỬ LÝ ẢNH =====
-  if (pending[userId]) {
-
+  // ===== VÀO CA =====
+  if (msg.content === '/vaocatruc') {
     if (msg.attachments.size === 0) {
-      return msg.reply('❌ Gửi ảnh!');
+      return msg.reply('❌ Phải gửi ảnh');
     }
+
+    const row = db.prepare(`SELECT * FROM shifts WHERE user_id = ? AND end_time IS NULL`)
+      .get(msg.author.id);
+
+    if (row) return msg.reply('⚠️ Đang trong ca');
 
     const img = msg.attachments.first().url;
+    const now = new Date();
 
-    // 👉 XÓA TIN NHẮN NGƯỜI DÙNG
-    await msg.delete().catch(() => {});
+    db.prepare(`INSERT INTO shifts (user_id, start_time, start_img) VALUES (?, ?, ?)`)
+      .run(msg.author.id, Date.now(), img);
 
-    // ===== START =====
-    if (pending[userId] === 'start') {
+    msg.reply(`🟢 Vào ca\n${now.toLocaleString('vi-VN')}`);
+  }
 
-      db.get(`SELECT * FROM shifts WHERE user_id = ? AND end_time IS NULL`,
-        [userId],
-        (err, row) => {
-
-          if (row) {
-            delete pending[userId];
-            return msg.channel.send('⚠️ Đang trong ca!');
-          }
-
-          const now = new Date();
-
-          db.run(`INSERT INTO shifts (user_id, start_time, start_img) VALUES (?, ?, ?)`,
-            [userId, Date.now(), img]);
-
-          msg.channel.send(`🟢 VÀO CA
-
-👤 ${msg.author.username}
-🕒 ${now.toLocaleString('vi-VN')}
-📸 ${img}`);
-
-          delete pending[userId];
-        });
+  // ===== KẾT THÚC =====
+  if (msg.content === '/ketthucca') {
+    if (msg.attachments.size === 0) {
+      return msg.reply('❌ Phải gửi ảnh');
     }
 
-    // ===== END =====
-    if (pending[userId] === 'end') {
+    const row = db.prepare(`SELECT * FROM shifts WHERE user_id = ? AND end_time IS NULL`)
+      .get(msg.author.id);
 
-      db.get(`SELECT * FROM shifts WHERE user_id = ? AND end_time IS NULL`,
-        [userId],
-        (err, row) => {
+    if (!row) return msg.reply('❌ Chưa vào ca');
 
-          if (!row) {
-            delete pending[userId];
-            return msg.channel.send('❌ Chưa vào ca!');
-          }
+    const end = Date.now();
+    const duration = end - row.start_time;
 
-          const end = Date.now();
-          const duration = end - row.start_time;
+    db.prepare(`UPDATE shifts SET end_time = ?, duration = ?, end_img = ? WHERE id = ?`)
+      .run(end, duration, msg.attachments.first().url, row.id);
 
-          const startDate = new Date(row.start_time);
-          const endDate = new Date();
-
-          db.run(`UPDATE shifts SET end_time = ?, duration = ?, end_img = ? WHERE id = ?`,
-            [end, duration, img, row.id]);
-
-          msg.channel.send(`🔴 KẾT THÚC
-
-👤 ${msg.author.username}
-🕒 ${startDate.toLocaleString('vi-VN')} → ${endDate.toLocaleString('vi-VN')}
-⏱️ ${formatTime(duration)}
-
-📸 ${img}`);
-
-          delete pending[userId];
-        });
-    }
-
-    return;
+    msg.reply(`⏱️ ${formatTime(duration)}`);
   }
 
   // ===== TỔNG =====
   if (msg.content === '/tongcatruc') {
-
-    db.all(`
-      SELECT shifts.user_id, SUM(shifts.duration) as total, users.rate 
-      FROM shifts 
+    const rows = db.prepare(`
+      SELECT shifts.user_id, SUM(duration) as total, users.rate
+      FROM shifts
       LEFT JOIN users ON shifts.user_id = users.user_id
       GROUP BY shifts.user_id
-    `, async (err, rows) => {
+    `).all();
 
-      let text = "📊 BẢNG TỔNG:\n\n";
+    let text = '📊 Tổng:\n';
 
-      for (const r of rows) {
-        const member = await msg.guild.members.fetch(r.user_id);
+    for (const r of rows) {
+      const member = await msg.guild.members.fetch(r.user_id);
+      const money = Math.floor((r.total / 3600000) * (r.rate || 0));
 
-        const hours = (r.total || 0) / 1000 / 3600;
-        const money = Math.floor(hours * (r.rate || 0));
-
-        text += `👤 ${member.user.username}
-⏱️ ${formatTime(r.total || 0)}
-💰 ${money.toLocaleString()} VND\n\n`;
-      }
-
-      msg.reply(text);
-    });
-  }
-
-  // ===== RESET =====
-  if (msg.content === '/lammoi') {
-
-    if (!msg.member.permissions.has('Administrator')) {
-      return msg.reply('❌ Admin only');
+      text += `${member.user.username}: ${formatTime(r.total)} - ${money}đ\n`;
     }
 
-    db.run(`DELETE FROM shifts`);
-    msg.reply('🧹 Đã reset');
+    msg.reply(text);
   }
 
+  // ===== LÀM MỚI =====
+  if (msg.content === '/lammoi') {
+    db.prepare(`DELETE FROM shifts`).run();
+    msg.reply('🧹 Đã làm mới');
+  }
 });
 
 client.login(TOKEN);
