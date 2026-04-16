@@ -7,6 +7,7 @@ const {
 } = require('discord.js');
 
 const Database = require('better-sqlite3');
+const express = require('express');
 
 const TOKEN = process.env.TOKEN;
 
@@ -67,13 +68,10 @@ client.on('ready', () => {
   console.log('🔥 BOT FULL PRO MAX chạy');
 });
 
-// ===== MESSAGE =====
+// ===== MENU =====
 client.on('messageCreate', async (msg) => {
   if (msg.author.bot) return;
 
-  const id = msg.author.id;
-
-  // ===== MENU =====
   if (msg.content === '.menu') {
     const row1 = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('benhvien').setLabel('🏥 Bệnh viện').setStyle(ButtonStyle.Success),
@@ -98,6 +96,8 @@ client.on('messageCreate', async (msg) => {
     });
   }
 
+  const id = msg.author.id;
+
   // ===== NHẬP LƯƠNG =====
   if (pending[id]?.action === 'setrate') {
     const rate = parseInt(msg.content);
@@ -107,10 +107,10 @@ client.on('messageCreate', async (msg) => {
       .run(id, rate);
 
     delete pending[id];
-    return msg.reply(`💰 Đã set ${rate}/giờ`);
+    return msg.reply(`💰 Lương của bạn: ${rate}/giờ`);
   }
 
-  // ===== ẢNH =====
+  // ===== NHẬN ẢNH =====
   if (!pending[id]) return;
   if (msg.attachments.size === 0) return;
 
@@ -122,7 +122,7 @@ client.on('messageCreate', async (msg) => {
 
     if (check) {
       delete pending[id];
-      return msg.reply('⚠️ Đang trong ca');
+      return msg.reply('⚠️ Bạn đang trong ca');
     }
 
     db.prepare(`
@@ -131,7 +131,7 @@ client.on('messageCreate', async (msg) => {
     `).run(id, pending[id].type, Date.now(), img);
 
     await msg.delete().catch(() => {});
-    msg.channel.send(`🟢 ${msg.author.username} vào ca ${pending[id].type}`);
+    msg.channel.send(`🟢 ${msg.author.username} vào ca ${pending[id].type.toUpperCase()}`);
   }
 
   // ===== END =====
@@ -140,7 +140,7 @@ client.on('messageCreate', async (msg) => {
 
     if (!row) {
       delete pending[id];
-      return msg.reply('❌ Chưa vào ca');
+      return msg.reply('❌ Bạn chưa vào ca');
     }
 
     const end = Date.now();
@@ -156,7 +156,9 @@ client.on('messageCreate', async (msg) => {
     const money = calcSalary(duration, row.start_time, rate);
 
     await msg.delete().catch(() => {});
-    msg.channel.send(`🔴 ${msg.author.username} kết thúc (${row.type})\n⏱ ${formatTime(duration)}\n💰 ${money}`);
+    msg.channel.send(`🔴 ${msg.author.username} kết thúc (${row.type})
+⏱ ${formatTime(duration)}
+💰 ${money}`);
   }
 
   delete pending[id];
@@ -168,7 +170,6 @@ client.on('interactionCreate', async (i) => {
 
   const id = i.user.id;
 
-  // START
   if (i.customId === 'benhvien') {
     pending[id] = { type: 'benhvien', action: 'start' };
     return i.reply({ content: '📸 Gửi ảnh vào ca BV', ephemeral: true });
@@ -184,13 +185,11 @@ client.on('interactionCreate', async (i) => {
     return i.reply({ content: '📸 Gửi ảnh kết thúc', ephemeral: true });
   }
 
-  // ĐĂNG KÝ LƯƠNG
   if (i.customId === 'register') {
     pending[id] = { action: 'setrate' };
     return i.reply({ content: '💰 Nhập lương (vd: 8000)', ephemeral: true });
   }
 
-  // ===== TỔNG =====
   if (i.customId === 'tong') {
     const rows = db.prepare(`
       SELECT user_id, type, SUM(duration) as total
@@ -205,7 +204,7 @@ client.on('interactionCreate', async (i) => {
       users[r.user_id][r.type] = r.total;
     }
 
-    let text = '📊 TỔNG CHI TIẾT:\n\n';
+    let text = '📊 TỔNG:\n\n';
 
     for (const userId in users) {
       let name = 'Unknown';
@@ -234,7 +233,6 @@ client.on('interactionCreate', async (i) => {
     return i.reply({ content: text, ephemeral: true });
   }
 
-  // ===== LIVE LSPD =====
   if (i.customId === 'lspd_list') {
     const rows = db.prepare(`
       SELECT * FROM shifts WHERE type='lspd' AND end_time IS NULL
@@ -242,19 +240,17 @@ client.on('interactionCreate', async (i) => {
 
     if (!rows.length) return i.reply({ content: '🚓 Không ai trực', ephemeral: true });
 
-    let text = '🚓 LSPD ĐANG TRỰC:\n\n';
+    let text = '🚓 LSPD:\n';
 
     for (const r of rows) {
       const member = await i.guild.members.fetch(r.user_id);
       const time = Date.now() - r.start_time;
-
-      text += `👤 ${member.user.username} | ${formatTime(time)}\n`;
+      text += `${member.user.username} - ${formatTime(time)}\n`;
     }
 
     return i.reply({ content: text, ephemeral: true });
   }
 
-  // ===== LIVE BV =====
   if (i.customId === 'bv_list') {
     const rows = db.prepare(`
       SELECT * FROM shifts WHERE type='benhvien' AND end_time IS NULL
@@ -262,19 +258,17 @@ client.on('interactionCreate', async (i) => {
 
     if (!rows.length) return i.reply({ content: '🏥 Không ai trực', ephemeral: true });
 
-    let text = '🏥 BV ĐANG TRỰC:\n\n';
+    let text = '🏥 BV:\n';
 
     for (const r of rows) {
       const member = await i.guild.members.fetch(r.user_id);
       const time = Date.now() - r.start_time;
-
-      text += `👤 ${member.user.username} | ${formatTime(time)}\n`;
+      text += `${member.user.username} - ${formatTime(time)}\n`;
     }
 
     return i.reply({ content: text, ephemeral: true });
   }
 
-  // ===== RESET =====
   if (i.customId === 'reset') {
     if (!i.member.permissions.has('Administrator')) {
       return i.reply({ content: '❌ Không có quyền', ephemeral: true });
@@ -285,4 +279,17 @@ client.on('interactionCreate', async (i) => {
   }
 });
 
+// ===== FIX RENDER (BẮT BUỘC) =====
+const app = express();
+
+app.get('/', (req, res) => {
+  res.send('Bot is running');
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🌐 Server chạy cổng ${PORT}`);
+});
+
+// ===== LOGIN =====
 client.login(TOKEN);
