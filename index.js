@@ -12,6 +12,10 @@ const express = require('express');
 
 const TOKEN = process.env.TOKEN;
 
+// ===== DEBUG TOKEN =====
+console.log("TOKEN:", TOKEN ? "OK" : "MISSING");
+
+// ===== CLIENT =====
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -20,9 +24,9 @@ const client = new Client({
   ]
 });
 
+// ===== DATABASE =====
 const db = new Database('data.db');
 
-// ===== DATABASE =====
 db.prepare(`
 CREATE TABLE IF NOT EXISTS shifts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,7 +56,7 @@ function formatTime(ms) {
   return `${h} giờ ${mm} phút`;
 }
 
-// ===== GIỜ ĐÊM X2 =====
+// ===== GIỜ ĐÊM =====
 function calcDurationWithNightBonus(start, end) {
   let total = 0;
   let current = start;
@@ -71,16 +75,26 @@ function calcDurationWithNightBonus(start, end) {
 }
 
 // ===== READY =====
-client.on('clientReady', () => {
-  console.log('🔥 BOT PRO chạy');
+client.on('ready', () => {
+  console.log('✅ BOT READY');
+});
+
+client.on('shardDisconnect', () => {
+  console.log('❌ DISCONNECTED');
+});
+
+client.on('shardReconnecting', () => {
+  console.log('🔄 RECONNECTING');
 });
 
 // ===== MESSAGE =====
 client.on('messageCreate', async (msg) => {
+  console.log("📩 MSG:", msg.content); // 🔥 debug
+
   if (msg.author.bot) return;
 
-  // MENU
-  if (msg.content.trim() === '.menu') {
+  // ===== MENU =====
+  if (msg.content.toLowerCase().trim() === '.menu') {
     const embed = new EmbedBuilder()
       .setTitle('📋 BẢNG CHẤM CÔNG')
       .setColor('Blue');
@@ -98,28 +112,21 @@ client.on('messageCreate', async (msg) => {
   }
 
   const id = msg.author.id;
-
   const pending = db.prepare(`SELECT * FROM pending WHERE user_id=?`).get(id);
   if (!pending) return;
 
-  // 🔥 FIX 100% nhận ảnh
   await new Promise(r => setTimeout(r, 1000));
 
   const attachment = msg.attachments.first();
 
   if (!attachment) {
-    return msg.reply('📸 Gửi lại ảnh giúp (ảnh chưa load)');
+    return msg.reply('📸 Gửi lại ảnh giúp');
   }
 
   const img = attachment.url;
 
   // ===== START =====
   if (pending.action === 'start') {
-
-    if (!pending.type) {
-      db.prepare(`DELETE FROM pending WHERE user_id=?`).run(id);
-      return msg.reply('❌ Lỗi dữ liệu, bấm lại nút');
-    }
 
     const check = db.prepare(`SELECT * FROM shifts WHERE user_id=? AND end_time IS NULL`).get(id);
 
@@ -185,19 +192,16 @@ client.on('interactionCreate', async (i) => {
     return i.reply({ content: '📸 Gửi ảnh kết thúc', ephemeral: true });
   }
 
-  // ===== RESET BV =====
   if (i.customId === 'reset_bv') {
     db.prepare(`DELETE FROM shifts WHERE type='benhvien'`).run();
-    return i.reply({ content: '✅ Đã reset Bệnh Viện', ephemeral: true });
+    return i.reply({ content: '✅ Reset BV', ephemeral: true });
   }
 
-  // ===== RESET LSPD =====
   if (i.customId === 'reset_lspd') {
     db.prepare(`DELETE FROM shifts WHERE type='lspd'`).run();
-    return i.reply({ content: '✅ Đã reset LSPD', ephemeral: true });
+    return i.reply({ content: '✅ Reset LSPD', ephemeral: true });
   }
 
-  // ===== TỔNG =====
   if (i.customId === 'tong') {
     const rows = db.prepare(`
       SELECT user_id, type, SUM(duration) as total
@@ -205,35 +209,14 @@ client.on('interactionCreate', async (i) => {
       GROUP BY user_id, type
     `).all();
 
-    const users = {};
-    for (const r of rows) {
-      if (!users[r.user_id]) users[r.user_id] = {};
-      users[r.user_id][r.type] = r.total;
-    }
-
     let text = '';
 
-    for (const userId in users) {
-      let name = 'Unknown';
-      try {
-        const member = await i.guild.members.fetch(userId);
-        name = member.user.username;
-      } catch {}
-
-      text += `👤 ${name}\n`;
-
-      if (users[userId].benhvien) {
-        text += `🏥 BV: ${formatTime(users[userId].benhvien)}\n`;
-      }
-      if (users[userId].lspd) {
-        text += `🚓 LSPD: ${formatTime(users[userId].lspd)}\n`;
-      }
-
-      text += '\n';
+    for (const r of rows) {
+      text += `👤 ${r.user_id}\n${r.type}: ${formatTime(r.total)}\n\n`;
     }
 
     const embed = new EmbedBuilder()
-      .setTitle('📊 TỔNG ONDUTY')
+      .setTitle('📊 TỔNG')
       .setDescription(text || 'Không có dữ liệu')
       .setColor('Blue');
 
