@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS shifts (
 )
 `).run();
 
-// ===== FORMAT TIME =====
+// ===== FORMAT =====
 function formatTime(ms) {
   const m = Math.floor(ms / 60000);
   const h = Math.floor(m / 60);
@@ -67,10 +67,11 @@ client.on('clientReady', () => {
   console.log('🔥 BOT chạy');
 });
 
-// ===== MENU + ẢNH =====
+// ===== MENU + XỬ LÝ ẢNH =====
 client.on('messageCreate', async (msg) => {
   if (msg.author.bot) return;
 
+  // ===== MENU =====
   if (msg.content.trim() === '.menu') {
     const row1 = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('benhvien').setLabel('🏥 Bệnh viện').setStyle(ButtonStyle.Success),
@@ -84,30 +85,24 @@ client.on('messageCreate', async (msg) => {
       new ButtonBuilder().setCustomId('reset_lspd').setLabel('🧹 Reset LSPD').setStyle(ButtonStyle.Danger)
     );
 
-    const row3 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('lspd_list').setLabel('📋 LSPD đang trực').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('bv_list').setLabel('🏥 BV đang trực').setStyle(ButtonStyle.Secondary)
-    );
-
     return msg.channel.send({
       content: '📋 BẢNG CHẤM CÔNG',
-      components: [row1, row2, row3]
+      components: [row1, row2]
     });
   }
 
   const id = msg.author.id;
 
-  // ❗ fix không im
-  if (!pending[id]) {
-    return msg.reply('❌ Bạn chưa bấm vào ca / kết thúc');
-  }
+  // ❗ KHÔNG pending → bỏ qua luôn (không reply)
+  if (!pending[id]) return;
 
+  // ❗ KHÔNG có ảnh → nhắc nhẹ
   if (!msg.attachments || msg.attachments.size === 0) {
-    return msg.reply('❌ Bạn phải gửi ảnh');
+    return msg.reply('📸 Gửi ảnh để xác nhận');
   }
 
-  // 🔥 delay tránh lỗi discord
-  await new Promise(r => setTimeout(r, 500));
+  // delay chống bug Discord
+  await new Promise(r => setTimeout(r, 300));
 
   const img = msg.attachments.first()?.url;
   if (!img) return msg.reply('❌ Không nhận được ảnh');
@@ -126,7 +121,6 @@ client.on('messageCreate', async (msg) => {
       VALUES (?, ?, ?, ?)
     `).run(id, pending[id].type, Date.now(), img);
 
-    await msg.delete().catch(() => {});
     msg.channel.send(`🟢 ${msg.author.username} vào ca ${pending[id].type.toUpperCase()}`);
 
     delete pending[id];
@@ -148,7 +142,6 @@ client.on('messageCreate', async (msg) => {
       UPDATE shifts SET end_time=?, duration=?, end_img=? WHERE id=?
     `).run(end, duration, img, row.id);
 
-    await msg.delete().catch(() => {});
     msg.channel.send(`🔴 ${msg.author.username} kết thúc (${row.type})
 ⏱ ${formatTime(duration)}`);
 
@@ -177,7 +170,7 @@ client.on('interactionCreate', async (i) => {
     return i.reply({ content: '📸 Gửi ảnh kết thúc', ephemeral: true });
   }
 
-  // ===== TỔNG ONDUTY =====
+  // ===== TỔNG =====
   if (i.customId === 'tong') {
     const rows = db.prepare(`
       SELECT user_id, type, SUM(duration) as total
@@ -218,7 +211,6 @@ client.on('interactionCreate', async (i) => {
     return i.reply({ content: text, ephemeral: true });
   }
 
-  // ===== RESET =====
   if (i.customId === 'reset_bv') {
     db.prepare(`DELETE FROM shifts WHERE type='benhvien'`).run();
     return i.reply('🧹 Đã reset BV');
