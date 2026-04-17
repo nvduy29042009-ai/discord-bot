@@ -3,7 +3,8 @@ const {
   GatewayIntentBits,
   ActionRowBuilder,
   ButtonBuilder,
-  ButtonStyle
+  ButtonStyle,
+  EmbedBuilder
 } = require('discord.js');
 
 const Database = require('better-sqlite3');
@@ -20,7 +21,6 @@ const client = new Client({
 });
 
 const db = new Database('data.db');
-const pending = {};
 
 // ===== DATABASE =====
 db.prepare(`
@@ -36,6 +36,14 @@ CREATE TABLE IF NOT EXISTS shifts (
 )
 `).run();
 
+db.prepare(`
+CREATE TABLE IF NOT EXISTS pending (
+  user_id TEXT PRIMARY KEY,
+  action TEXT,
+  type TEXT
+)
+`).run();
+
 // ===== FORMAT =====
 function formatTime(ms) {
   const m = Math.floor(ms / 60000);
@@ -44,7 +52,7 @@ function formatTime(ms) {
   return `${h} giờ ${mm} phút`;
 }
 
-// ===== GIỜ ĐÊM X2 =====
+// ===== GIỜ ĐÊM =====
 function calcDurationWithNightBonus(start, end) {
   let total = 0;
   let current = start;
@@ -64,74 +72,70 @@ function calcDurationWithNightBonus(start, end) {
 
 // ===== READY =====
 client.on('clientReady', () => {
-  console.log('🔥 BOT chạy');
+  console.log('🔥 BOT PRO chạy');
 });
 
-// ===== MENU + XỬ LÝ ẢNH =====
+// ===== MENU =====
 client.on('messageCreate', async (msg) => {
   if (msg.author.bot) return;
 
-  // ===== MENU =====
   if (msg.content.trim() === '.menu') {
-    const row1 = new ActionRowBuilder().addComponents(
+    const embed = new EmbedBuilder()
+      .setTitle('📋 BẢNG CHẤM CÔNG PRO')
+      .setColor('Blue');
+
+    const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('benhvien').setLabel('🏥 Bệnh viện').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('lspd').setLabel('🚓 LSPD').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('end').setLabel('🔴 Kết thúc').setStyle(ButtonStyle.Danger)
+      new ButtonBuilder().setCustomId('end').setLabel('🔴 Kết thúc').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('tong').setLabel('📊 Tổng').setStyle(ButtonStyle.Secondary)
     );
 
-    const row2 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('tong').setLabel('📊 Tổng ONDUTY').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('reset_bv').setLabel('🧹 Reset BV').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('reset_lspd').setLabel('🧹 Reset LSPD').setStyle(ButtonStyle.Danger)
-    );
-
-    return msg.channel.send({
-      content: '📋 BẢNG CHẤM CÔNG',
-      components: [row1, row2]
-    });
+    return msg.channel.send({ embeds: [embed], components: [row] });
   }
 
   const id = msg.author.id;
 
-  // ❗ KHÔNG pending → bỏ qua luôn (không reply)
-  if (!pending[id]) return;
+  const pending = db.prepare(`SELECT * FROM pending WHERE user_id=?`).get(id);
+  if (!pending) return;
 
-  // ❗ KHÔNG có ảnh → nhắc nhẹ
   if (!msg.attachments || msg.attachments.size === 0) {
     return msg.reply('📸 Gửi ảnh để xác nhận');
   }
 
-  // delay chống bug Discord
   await new Promise(r => setTimeout(r, 300));
-
   const img = msg.attachments.first()?.url;
-  if (!img) return msg.reply('❌ Không nhận được ảnh');
+  if (!img) return;
 
   // ===== START =====
-  if (pending[id].action === 'start') {
+  if (pending.action === 'start') {
     const check = db.prepare(`SELECT * FROM shifts WHERE user_id=? AND end_time IS NULL`).get(id);
 
     if (check) {
-      delete pending[id];
+      db.prepare(`DELETE FROM pending WHERE user_id=?`).run(id);
       return msg.reply('⚠️ Bạn đang trong ca');
     }
 
     db.prepare(`
       INSERT INTO shifts (user_id, type, start_time, start_img)
       VALUES (?, ?, ?, ?)
-    `).run(id, pending[id].type, Date.now(), img);
+    `).run(id, pending.type, Date.now(), img);
 
-    msg.channel.send(`🟢 ${msg.author.username} vào ca ${pending[id].type.toUpperCase()}`);
+    db.prepare(`DELETE FROM pending WHERE user_id=?`).run(id);
 
-    delete pending[id];
+    const embed = new EmbedBuilder()
+      .setColor('Green')
+      .setDescription(`🟢 ${msg.author.username} vào ca ${pending.type.toUpperCase()}`);
+
+    msg.channel.send({ embeds: [embed] });
   }
 
   // ===== END =====
-  else if (pending[id].action === 'end') {
+  else if (pending.action === 'end') {
     const row = db.prepare(`SELECT * FROM shifts WHERE user_id=? AND end_time IS NULL`).get(id);
 
     if (!row) {
-      delete pending[id];
+      db.prepare(`DELETE FROM pending WHERE user_id=?`).run(id);
       return msg.reply('❌ Bạn chưa vào ca');
     }
 
@@ -142,10 +146,14 @@ client.on('messageCreate', async (msg) => {
       UPDATE shifts SET end_time=?, duration=?, end_img=? WHERE id=?
     `).run(end, duration, img, row.id);
 
-    msg.channel.send(`🔴 ${msg.author.username} kết thúc (${row.type})
+    db.prepare(`DELETE FROM pending WHERE user_id=?`).run(id);
+
+    const embed = new EmbedBuilder()
+      .setColor('Red')
+      .setDescription(`🔴 ${msg.author.username} kết thúc (${row.type})
 ⏱ ${formatTime(duration)}`);
 
-    delete pending[id];
+    msg.channel.send({ embeds: [embed] });
   }
 });
 
@@ -156,21 +164,20 @@ client.on('interactionCreate', async (i) => {
   const id = i.user.id;
 
   if (i.customId === 'benhvien') {
-    pending[id] = { type: 'benhvien', action: 'start' };
+    db.prepare(`INSERT OR REPLACE INTO pending VALUES (?, ?, ?)`).run(id, 'start', 'benhvien');
     return i.reply({ content: '📸 Gửi ảnh vào ca BV', ephemeral: true });
   }
 
   if (i.customId === 'lspd') {
-    pending[id] = { type: 'lspd', action: 'start' };
+    db.prepare(`INSERT OR REPLACE INTO pending VALUES (?, ?, ?)`).run(id, 'start', 'lspd');
     return i.reply({ content: '📸 Gửi ảnh vào ca LSPD', ephemeral: true });
   }
 
   if (i.customId === 'end') {
-    pending[id] = { action: 'end' };
+    db.prepare(`INSERT OR REPLACE INTO pending VALUES (?, ?, ?)`).run(id, 'end', null);
     return i.reply({ content: '📸 Gửi ảnh kết thúc', ephemeral: true });
   }
 
-  // ===== TỔNG =====
   if (i.customId === 'tong') {
     const rows = db.prepare(`
       SELECT user_id, type, SUM(duration) as total
@@ -179,17 +186,15 @@ client.on('interactionCreate', async (i) => {
     `).all();
 
     const users = {};
-
     for (const r of rows) {
       if (!users[r.user_id]) users[r.user_id] = {};
       users[r.user_id][r.type] = r.total;
     }
 
-    let text = '📊 TỔNG ONDUTY:\n\n';
+    let text = '';
 
     for (const userId in users) {
       let name = 'Unknown';
-
       try {
         const member = await i.guild.members.fetch(userId);
         name = member.user.username;
@@ -200,25 +205,19 @@ client.on('interactionCreate', async (i) => {
       if (users[userId].benhvien) {
         text += `🏥 BV: ${formatTime(users[userId].benhvien)}\n`;
       }
-
       if (users[userId].lspd) {
         text += `🚓 LSPD: ${formatTime(users[userId].lspd)}\n`;
       }
 
-      text += `\n`;
+      text += '\n';
     }
 
-    return i.reply({ content: text, ephemeral: true });
-  }
+    const embed = new EmbedBuilder()
+      .setTitle('📊 TỔNG ONDUTY')
+      .setDescription(text || 'Không có dữ liệu')
+      .setColor('Blue');
 
-  if (i.customId === 'reset_bv') {
-    db.prepare(`DELETE FROM shifts WHERE type='benhvien'`).run();
-    return i.reply('🧹 Đã reset BV');
-  }
-
-  if (i.customId === 'reset_lspd') {
-    db.prepare(`DELETE FROM shifts WHERE type='lspd'`).run();
-    return i.reply('🧹 Đã reset LSPD');
+    return i.reply({ embeds: [embed], ephemeral: true });
   }
 });
 
