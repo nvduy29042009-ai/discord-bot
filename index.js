@@ -36,14 +36,7 @@ CREATE TABLE IF NOT EXISTS shifts (
 )
 `).run();
 
-db.prepare(`
-CREATE TABLE IF NOT EXISTS users (
-  user_id TEXT PRIMARY KEY,
-  rate INTEGER
-)
-`).run();
-
-// ===== FORMAT =====
+// ===== FORMAT TIME =====
 function formatTime(ms) {
   const m = Math.floor(ms / 60000);
   const h = Math.floor(m / 60);
@@ -51,21 +44,28 @@ function formatTime(ms) {
   return `${h} giờ ${mm} phút`;
 }
 
-// ===== CA ĐÊM X2 =====
-function calcSalary(duration, startTime, rate) {
-  const hour = new Date(startTime).getHours();
-  let money = (duration / 3600000) * rate;
+// ===== TÍNH GIỜ ĐÊM X2 =====
+function calcDurationWithNightBonus(start, end) {
+  let total = 0;
+  let current = start;
 
-  if (hour >= 23 || hour < 6) {
-    money *= 2;
+  while (current < end) {
+    const next = Math.min(current + 60000, end); // mỗi phút
+    const hour = new Date(current).getHours();
+
+    const isNight = (hour >= 23 || hour < 6);
+    const diff = next - current;
+
+    total += isNight ? diff * 2 : diff;
+    current = next;
   }
 
-  return Math.floor(money);
+  return total;
 }
 
 // ===== READY =====
 client.on('ready', () => {
-  console.log('🔥 BOT FULL PRO MAX chạy');
+  console.log('🔥 BOT chạy');
 });
 
 // ===== MENU =====
@@ -80,9 +80,9 @@ client.on('messageCreate', async (msg) => {
     );
 
     const row2 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('tong').setLabel('📊 Tổng + lương').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('register').setLabel('💰 Đăng ký lương').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('reset').setLabel('🧹 Reset').setStyle(ButtonStyle.Danger)
+      new ButtonBuilder().setCustomId('tong').setLabel('📊 Tổng ONDUTY').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('reset_bv').setLabel('🧹 Reset BV').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('reset_lspd').setLabel('🧹 Reset LSPD').setStyle(ButtonStyle.Danger)
     );
 
     const row3 = new ActionRowBuilder().addComponents(
@@ -91,30 +91,20 @@ client.on('messageCreate', async (msg) => {
     );
 
     return msg.channel.send({
-      content: '📋 BẢNG CHẤM CÔNG PRO MAX',
+      content: '📋 BẢNG CHẤM CÔNG',
       components: [row1, row2, row3]
     });
   }
 
   const id = msg.author.id;
 
-  // ===== NHẬP LƯƠNG =====
-  if (pending[id]?.action === 'setrate') {
-    const rate = parseInt(msg.content);
-    if (!rate) return msg.reply('❌ Nhập số hợp lệ');
+  if (!pending[id]) return;
 
-    db.prepare(`INSERT OR REPLACE INTO users VALUES (?, ?)`)
-      .run(id, rate);
-
-    delete pending[id];
-    return msg.reply(`💰 Lương của bạn: ${rate}/giờ`);
+  if (msg.attachments.size === 0) {
+    return msg.reply('❌ Bạn phải gửi ảnh');
   }
 
-  // ===== NHẬN ẢNH =====
-  if (!pending[id]) return;
-  if (msg.attachments.size === 0) return;
-
-  const img = msg.attachments.first().url;
+  const img = msg.attachments.first()?.url;
 
   // ===== START =====
   if (pending[id].action === 'start') {
@@ -132,10 +122,12 @@ client.on('messageCreate', async (msg) => {
 
     await msg.delete().catch(() => {});
     msg.channel.send(`🟢 ${msg.author.username} vào ca ${pending[id].type.toUpperCase()}`);
+
+    delete pending[id];
   }
 
   // ===== END =====
-  if (pending[id].action === 'end') {
+  else if (pending[id].action === 'end') {
     const row = db.prepare(`SELECT * FROM shifts WHERE user_id=? AND end_time IS NULL`).get(id);
 
     if (!row) {
@@ -144,24 +136,20 @@ client.on('messageCreate', async (msg) => {
     }
 
     const end = Date.now();
-    const duration = end - row.start_time;
+
+    // 👉 tính giờ có x2 ban đêm
+    const duration = calcDurationWithNightBonus(row.start_time, end);
 
     db.prepare(`
       UPDATE shifts SET end_time=?, duration=?, end_img=? WHERE id=?
     `).run(end, duration, img, row.id);
 
-    const user = db.prepare(`SELECT * FROM users WHERE user_id=?`).get(id);
-    const rate = user?.rate || 0;
-
-    const money = calcSalary(duration, row.start_time, rate);
-
     await msg.delete().catch(() => {});
     msg.channel.send(`🔴 ${msg.author.username} kết thúc (${row.type})
-⏱ ${formatTime(duration)}
-💰 ${money}`);
-  }
+⏱ ${formatTime(duration)}`);
 
-  delete pending[id];
+    delete pending[id];
+  }
 });
 
 // ===== BUTTON =====
@@ -185,11 +173,7 @@ client.on('interactionCreate', async (i) => {
     return i.reply({ content: '📸 Gửi ảnh kết thúc', ephemeral: true });
   }
 
-  if (i.customId === 'register') {
-    pending[id] = { action: 'setrate' };
-    return i.reply({ content: '💰 Nhập lương (vd: 8000)', ephemeral: true });
-  }
-
+  // ===== TỔNG ONDUTY =====
   if (i.customId === 'tong') {
     const rows = db.prepare(`
       SELECT user_id, type, SUM(duration) as total
@@ -204,7 +188,7 @@ client.on('interactionCreate', async (i) => {
       users[r.user_id][r.type] = r.total;
     }
 
-    let text = '📊 TỔNG:\n\n';
+    let text = '📊 TỔNG ONDUTY:\n\n';
 
     for (const userId in users) {
       let name = 'Unknown';
@@ -214,18 +198,9 @@ client.on('interactionCreate', async (i) => {
         name = member.user.username;
       } catch {}
 
-      const user = db.prepare(`SELECT * FROM users WHERE user_id=?`).get(userId);
-      const rate = user?.rate || 0;
-
-      const bv = users[userId].benhvien;
-      const lspd = users[userId].lspd;
-
-      const moneyBV = calcSalary(bv, Date.now(), rate);
-      const moneyLSPD = calcSalary(lspd, Date.now(), rate);
-
       text += `👤 ${name}
-🏥 BV: ${formatTime(bv)} | 💰 ${moneyBV}
-🚓 LSPD: ${formatTime(lspd)} | 💰 ${moneyLSPD}
+🏥 BV: ${formatTime(users[userId].benhvien)}
+🚓 LSPD: ${formatTime(users[userId].lspd)}
 
 `;
     }
@@ -233,6 +208,7 @@ client.on('interactionCreate', async (i) => {
     return i.reply({ content: text, ephemeral: true });
   }
 
+  // ===== LIST =====
   if (i.customId === 'lspd_list') {
     const rows = db.prepare(`
       SELECT * FROM shifts WHERE type='lspd' AND end_time IS NULL
@@ -269,17 +245,27 @@ client.on('interactionCreate', async (i) => {
     return i.reply({ content: text, ephemeral: true });
   }
 
-  if (i.customId === 'reset') {
+  // ===== RESET =====
+  if (i.customId === 'reset_bv') {
     if (!i.member.permissions.has('Administrator')) {
       return i.reply({ content: '❌ Không có quyền', ephemeral: true });
     }
 
-    db.prepare(`DELETE FROM shifts`).run();
-    return i.reply('🧹 Đã reset');
+    db.prepare(`DELETE FROM shifts WHERE type='benhvien'`).run();
+    return i.reply('🧹 Đã reset BV');
+  }
+
+  if (i.customId === 'reset_lspd') {
+    if (!i.member.permissions.has('Administrator')) {
+      return i.reply({ content: '❌ Không có quyền', ephemeral: true });
+    }
+
+    db.prepare(`DELETE FROM shifts WHERE type='lspd'`).run();
+    return i.reply('🧹 Đã reset LSPD');
   }
 });
 
-// ===== FIX RENDER (BẮT BUỘC) =====
+// ===== SERVER =====
 const app = express();
 
 app.get('/', (req, res) => {
@@ -287,9 +273,7 @@ app.get('/', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🌐 Server chạy cổng ${PORT}`);
-});
+app.listen(PORT);
 
 // ===== LOGIN =====
 client.login(TOKEN);
