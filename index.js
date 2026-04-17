@@ -52,7 +52,7 @@ function formatTime(ms) {
   return `${h} giờ ${mm} phút`;
 }
 
-// ===== GIỜ ĐÊM =====
+// ===== GIỜ ĐÊM X2 =====
 function calcDurationWithNightBonus(start, end) {
   let total = 0;
   let current = start;
@@ -79,17 +79,19 @@ client.on('clientReady', () => {
 client.on('messageCreate', async (msg) => {
   if (msg.author.bot) return;
 
-  // ===== MENU =====
+  // MENU
   if (msg.content.trim() === '.menu') {
     const embed = new EmbedBuilder()
-      .setTitle('📋 BẢNG CHẤM CÔNG PRO')
+      .setTitle('📋 BẢNG CHẤM CÔNG')
       .setColor('Blue');
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('benhvien').setLabel('🏥 Bệnh viện').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('lspd').setLabel('🚓 LSPD').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('end').setLabel('🔴 Kết thúc').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('tong').setLabel('📊 Tổng').setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId('tong').setLabel('📊 Tổng').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('reset_bv').setLabel('🔁 Reset BV').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('reset_lspd').setLabel('🔁 Reset LSPD').setStyle(ButtonStyle.Danger)
     );
 
     return msg.channel.send({ embeds: [embed], components: [row] });
@@ -100,15 +102,25 @@ client.on('messageCreate', async (msg) => {
   const pending = db.prepare(`SELECT * FROM pending WHERE user_id=?`).get(id);
   if (!pending) return;
 
-  if (!msg.attachments || msg.attachments.size === 0) return;
+  // 🔥 FIX 100% nhận ảnh
+  await new Promise(r => setTimeout(r, 1000));
 
-  await new Promise(r => setTimeout(r, 300));
+  const attachment = msg.attachments.first();
 
-  const img = msg.attachments.first()?.url;
-  if (!img) return;
+  if (!attachment) {
+    return msg.reply('📸 Gửi lại ảnh giúp (ảnh chưa load)');
+  }
+
+  const img = attachment.url;
 
   // ===== START =====
   if (pending.action === 'start') {
+
+    if (!pending.type) {
+      db.prepare(`DELETE FROM pending WHERE user_id=?`).run(id);
+      return msg.reply('❌ Lỗi dữ liệu, bấm lại nút');
+    }
+
     const check = db.prepare(`SELECT * FROM shifts WHERE user_id=? AND end_time IS NULL`).get(id);
 
     if (check) {
@@ -156,20 +168,36 @@ client.on('interactionCreate', async (i) => {
   const id = i.user.id;
 
   if (i.customId === 'benhvien') {
-    db.prepare(`INSERT OR REPLACE INTO pending VALUES (?, ?, ?)`).run(id, 'start', 'benhvien');
+    db.prepare(`INSERT OR REPLACE INTO pending VALUES (?, ?, ?)`)
+      .run(id, 'start', 'benhvien');
     return i.reply({ content: '📸 Gửi ảnh vào ca BV', ephemeral: true });
   }
 
   if (i.customId === 'lspd') {
-    db.prepare(`INSERT OR REPLACE INTO pending VALUES (?, ?, ?)`).run(id, 'start', 'lspd');
+    db.prepare(`INSERT OR REPLACE INTO pending VALUES (?, ?, ?)`)
+      .run(id, 'start', 'lspd');
     return i.reply({ content: '📸 Gửi ảnh vào ca LSPD', ephemeral: true });
   }
 
   if (i.customId === 'end') {
-    db.prepare(`INSERT OR REPLACE INTO pending VALUES (?, ?, ?)`).run(id, 'end', null);
+    db.prepare(`INSERT OR REPLACE INTO pending VALUES (?, ?, ?)`)
+      .run(id, 'end', null);
     return i.reply({ content: '📸 Gửi ảnh kết thúc', ephemeral: true });
   }
 
+  // ===== RESET BV =====
+  if (i.customId === 'reset_bv') {
+    db.prepare(`DELETE FROM shifts WHERE type='benhvien'`).run();
+    return i.reply({ content: '✅ Đã reset Bệnh Viện', ephemeral: true });
+  }
+
+  // ===== RESET LSPD =====
+  if (i.customId === 'reset_lspd') {
+    db.prepare(`DELETE FROM shifts WHERE type='lspd'`).run();
+    return i.reply({ content: '✅ Đã reset LSPD', ephemeral: true });
+  }
+
+  // ===== TỔNG =====
   if (i.customId === 'tong') {
     const rows = db.prepare(`
       SELECT user_id, type, SUM(duration) as total
