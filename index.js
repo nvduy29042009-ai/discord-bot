@@ -75,10 +75,11 @@ client.on('clientReady', () => {
   console.log('🔥 BOT PRO chạy');
 });
 
-// ===== MENU =====
+// ===== MESSAGE =====
 client.on('messageCreate', async (msg) => {
   if (msg.author.bot) return;
 
+  // ===== MENU =====
   if (msg.content.trim() === '.menu') {
     const embed = new EmbedBuilder()
       .setTitle('📋 BẢNG CHẤM CÔNG PRO')
@@ -99,11 +100,10 @@ client.on('messageCreate', async (msg) => {
   const pending = db.prepare(`SELECT * FROM pending WHERE user_id=?`).get(id);
   if (!pending) return;
 
-  if (!msg.attachments || msg.attachments.size === 0) {
-    return msg.reply('📸 Gửi ảnh để xác nhận');
-  }
+  if (!msg.attachments || msg.attachments.size === 0) return;
 
   await new Promise(r => setTimeout(r, 300));
+
   const img = msg.attachments.first()?.url;
   if (!img) return;
 
@@ -123,11 +123,7 @@ client.on('messageCreate', async (msg) => {
 
     db.prepare(`DELETE FROM pending WHERE user_id=?`).run(id);
 
-    const embed = new EmbedBuilder()
-      .setColor('Green')
-      .setDescription(`🟢 ${msg.author.username} vào ca ${pending.type.toUpperCase()}`);
-
-    msg.channel.send({ embeds: [embed] });
+    msg.channel.send(`🟢 ${msg.author.username} vào ca ${pending.type.toUpperCase()}`);
   }
 
   // ===== END =====
@@ -148,12 +144,8 @@ client.on('messageCreate', async (msg) => {
 
     db.prepare(`DELETE FROM pending WHERE user_id=?`).run(id);
 
-    const embed = new EmbedBuilder()
-      .setColor('Red')
-      .setDescription(`🔴 ${msg.author.username} kết thúc (${row.type})
+    msg.channel.send(`🔴 ${msg.author.username} kết thúc (${row.type})
 ⏱ ${formatTime(duration)}`);
-
-    msg.channel.send({ embeds: [embed] });
   }
 });
 
