@@ -44,15 +44,14 @@ function formatTime(ms) {
   return `${h} giờ ${mm} phút`;
 }
 
-// ===== TÍNH GIỜ ĐÊM X2 =====
+// ===== GIỜ ĐÊM X2 =====
 function calcDurationWithNightBonus(start, end) {
   let total = 0;
   let current = start;
 
   while (current < end) {
-    const next = Math.min(current + 60000, end); // mỗi phút
+    const next = Math.min(current + 60000, end);
     const hour = new Date(current).getHours();
-
     const isNight = (hour >= 23 || hour < 6);
     const diff = next - current;
 
@@ -64,15 +63,15 @@ function calcDurationWithNightBonus(start, end) {
 }
 
 // ===== READY =====
-client.on('ready', () => {
+client.on('clientReady', () => {
   console.log('🔥 BOT chạy');
 });
 
-// ===== MENU =====
+// ===== MENU + ẢNH =====
 client.on('messageCreate', async (msg) => {
   if (msg.author.bot) return;
 
-  if (msg.content === '.menu') {
+  if (msg.content.trim() === '.menu') {
     const row1 = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('benhvien').setLabel('🏥 Bệnh viện').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('lspd').setLabel('🚓 LSPD').setStyle(ButtonStyle.Primary),
@@ -98,13 +97,20 @@ client.on('messageCreate', async (msg) => {
 
   const id = msg.author.id;
 
-  if (!pending[id]) return;
+  // ❗ fix không im
+  if (!pending[id]) {
+    return msg.reply('❌ Bạn chưa bấm vào ca / kết thúc');
+  }
 
-  if (msg.attachments.size === 0) {
+  if (!msg.attachments || msg.attachments.size === 0) {
     return msg.reply('❌ Bạn phải gửi ảnh');
   }
 
+  // 🔥 delay tránh lỗi discord
+  await new Promise(r => setTimeout(r, 500));
+
   const img = msg.attachments.first()?.url;
+  if (!img) return msg.reply('❌ Không nhận được ảnh');
 
   // ===== START =====
   if (pending[id].action === 'start') {
@@ -136,8 +142,6 @@ client.on('messageCreate', async (msg) => {
     }
 
     const end = Date.now();
-
-    // 👉 tính giờ có x2 ban đêm
     const duration = calcDurationWithNightBonus(row.start_time, end);
 
     db.prepare(`
@@ -184,7 +188,7 @@ client.on('interactionCreate', async (i) => {
     const users = {};
 
     for (const r of rows) {
-      if (!users[r.user_id]) users[r.user_id] = { benhvien: 0, lspd: 0 };
+      if (!users[r.user_id]) users[r.user_id] = {};
       users[r.user_id][r.type] = r.total;
     }
 
@@ -198,48 +202,17 @@ client.on('interactionCreate', async (i) => {
         name = member.user.username;
       } catch {}
 
-      text += `👤 ${name}
-🏥 BV: ${formatTime(users[userId].benhvien)}
-🚓 LSPD: ${formatTime(users[userId].lspd)}
+      text += `👤 ${name}\n`;
 
-`;
-    }
+      if (users[userId].benhvien) {
+        text += `🏥 BV: ${formatTime(users[userId].benhvien)}\n`;
+      }
 
-    return i.reply({ content: text, ephemeral: true });
-  }
+      if (users[userId].lspd) {
+        text += `🚓 LSPD: ${formatTime(users[userId].lspd)}\n`;
+      }
 
-  // ===== LIST =====
-  if (i.customId === 'lspd_list') {
-    const rows = db.prepare(`
-      SELECT * FROM shifts WHERE type='lspd' AND end_time IS NULL
-    `).all();
-
-    if (!rows.length) return i.reply({ content: '🚓 Không ai trực', ephemeral: true });
-
-    let text = '🚓 LSPD:\n';
-
-    for (const r of rows) {
-      const member = await i.guild.members.fetch(r.user_id);
-      const time = Date.now() - r.start_time;
-      text += `${member.user.username} - ${formatTime(time)}\n`;
-    }
-
-    return i.reply({ content: text, ephemeral: true });
-  }
-
-  if (i.customId === 'bv_list') {
-    const rows = db.prepare(`
-      SELECT * FROM shifts WHERE type='benhvien' AND end_time IS NULL
-    `).all();
-
-    if (!rows.length) return i.reply({ content: '🏥 Không ai trực', ephemeral: true });
-
-    let text = '🏥 BV:\n';
-
-    for (const r of rows) {
-      const member = await i.guild.members.fetch(r.user_id);
-      const time = Date.now() - r.start_time;
-      text += `${member.user.username} - ${formatTime(time)}\n`;
+      text += `\n`;
     }
 
     return i.reply({ content: text, ephemeral: true });
@@ -247,19 +220,11 @@ client.on('interactionCreate', async (i) => {
 
   // ===== RESET =====
   if (i.customId === 'reset_bv') {
-    if (!i.member.permissions.has('Administrator')) {
-      return i.reply({ content: '❌ Không có quyền', ephemeral: true });
-    }
-
     db.prepare(`DELETE FROM shifts WHERE type='benhvien'`).run();
     return i.reply('🧹 Đã reset BV');
   }
 
   if (i.customId === 'reset_lspd') {
-    if (!i.member.permissions.has('Administrator')) {
-      return i.reply({ content: '❌ Không có quyền', ephemeral: true });
-    }
-
     db.prepare(`DELETE FROM shifts WHERE type='lspd'`).run();
     return i.reply('🧹 Đã reset LSPD');
   }
@@ -267,13 +232,8 @@ client.on('interactionCreate', async (i) => {
 
 // ===== SERVER =====
 const app = express();
-
-app.get('/', (req, res) => {
-  res.send('Bot is running');
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT);
+app.get('/', (req, res) => res.send('Bot is running'));
+app.listen(process.env.PORT || 3000);
 
 // ===== LOGIN =====
 client.login(TOKEN);
