@@ -9,5 +9,11 @@
     "discord.js": "^14.14.1",
     "better-sqlite3": "^9.4.0",
     "express": "^4.19.2"
-  }
+  },
+  "description": "",
+  "devDependencies": {},
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
 }

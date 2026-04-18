@@ -10,10 +10,14 @@ const {
 const Database = require('better-sqlite3');
 const express = require('express');
 
-const TOKEN = process.env.TOKEN;
+// 🔥 CHỈ CẦN THAY TOKEN Ở ĐÂY
+const TOKEN = "MTQ5NDMzMTk5NDY0ODM0NjY0NA.G0PavT.EAl2ctMCUUpJHZRC0wpHf73Rx4ZV7__6OPDDlU";
 
-// ===== DEBUG TOKEN =====
-console.log("TOKEN:", TOKEN ? "OK" : "MISSING");
+// ===== CHECK TOKEN =====
+if (!TOKEN) {
+  console.log("❌ THIẾU TOKEN");
+  process.exit(1);
+}
 
 // ===== CLIENT =====
 const client = new Client({
@@ -75,7 +79,7 @@ function calcDurationWithNightBonus(start, end) {
 }
 
 // ===== READY =====
-client.on('ready', () => {
+client.once('ready', () => {
   console.log('✅ BOT READY');
 });
 
@@ -89,41 +93,65 @@ client.on('shardReconnecting', () => {
 
 // ===== MESSAGE =====
 client.on('messageCreate', async (msg) => {
-  console.log("📩 MSG:", msg.content); // 🔥 debug
-
   if (msg.author.bot) return;
 
   // ===== MENU =====
-  if (msg.content.toLowerCase().trim() === '.menu') {
-    const embed = new EmbedBuilder()
-      .setTitle('📋 BẢNG CHẤM CÔNG')
-      .setColor('Blue');
+  if (msg.content === '!menu') {
 
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('benhvien').setLabel('🏥 Bệnh viện').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('lspd').setLabel('🚓 LSPD').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('end').setLabel('🔴 Kết thúc').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('tong').setLabel('📊 Tổng').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('reset_bv').setLabel('🔁 Reset BV').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('reset_lspd').setLabel('🔁 Reset LSPD').setStyle(ButtonStyle.Danger)
-    );
+  const embed = new EmbedBuilder()
+    .setTitle('📋 BẢNG CHẤM CÔNG ĐA KHU GTA GO')
+    .setColor('Blue');
 
-    return msg.channel.send({ embeds: [embed], components: [row] });
-  }
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('benhvien').setLabel('🏥 Bệnh viện').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('lspd').setLabel('🚓 LSPD').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('end').setLabel('🔴 Kết thúc').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('tong').setLabel('📊 Tổng').setStyle(ButtonStyle.Secondary)
+  );
+
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('reset_bv').setLabel('🔁 Reset BV').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('reset_lspd').setLabel('🔁 Reset LSPD').setStyle(ButtonStyle.Danger)
+  );
+
+  return msg.channel.send({
+    embeds: [embed],
+    components: [row1, row2]
+  });
+}
 
   const id = msg.author.id;
-  const pending = db.prepare(`SELECT * FROM pending WHERE user_id=?`).get(id);
-  if (!pending) return;
 
-  await new Promise(r => setTimeout(r, 1000));
+// 🔥 DEBUG
+console.log("📩 MSG:", msg.content);
+console.log("📎 ATTACH SIZE:", msg.attachments.size);
 
-  const attachment = msg.attachments.first();
+// 🔥 LẤY PENDING
+const pending = db.prepare(`SELECT * FROM pending WHERE user_id=?`).get(id);
 
-  if (!attachment) {
-    return msg.reply('📸 Gửi lại ảnh giúp');
-  }
+if (!pending) {
+  console.log("❌ KHÔNG CÓ PENDING");
+  return;
+}
 
-  const img = attachment.url;
+// delay nhẹ
+await new Promise(r => setTimeout(r, 500));
+
+// 🔥 LẤY ẢNH
+let attachment = msg.attachments.first();
+
+// 🔥 hỗ trợ luôn gửi link ảnh
+if (!attachment && msg.content.includes("http")) {
+  attachment = { url: msg.content };
+}
+
+// ❌ không có ảnh
+if (!attachment) {
+  console.log("❌ KHÔNG CÓ ẢNH");
+  return msg.reply('📸 Gửi ảnh (file hoặc link đều được)');
+}
+
+const img = attachment.url;
 
   // ===== START =====
   if (pending.action === 'start') {
@@ -203,31 +231,47 @@ client.on('interactionCreate', async (i) => {
   }
 
   if (i.customId === 'tong') {
-    const rows = db.prepare(`
-      SELECT user_id, type, SUM(duration) as total
-      FROM shifts
-      GROUP BY user_id, type
-    `).all();
+  const rows = db.prepare(`
+    SELECT user_id, type, SUM(duration) as total
+    FROM shifts
+    GROUP BY user_id, type
+  `).all();
 
-    let text = '';
+  let bv = '';
+  let lspd = '';
 
-    for (const r of rows) {
-      text += `👤 ${r.user_id}\n${r.type}: ${formatTime(r.total)}\n\n`;
+  for (const r of rows) {
+    // 🔥 lấy tên user thay vì ID
+    const user = await client.users.fetch(r.user_id).catch(() => null);
+    const name = user ? user.username : r.user_id;
+
+    if (r.type === 'benhvien') {
+      bv += `👤 ${name}: ${formatTime(r.total)}\n`;
+    } else if (r.type === 'lspd') {
+      lspd += `👤 ${name}: ${formatTime(r.total)}\n`;
     }
-
-    const embed = new EmbedBuilder()
-      .setTitle('📊 TỔNG')
-      .setDescription(text || 'Không có dữ liệu')
-      .setColor('Blue');
-
-    return i.reply({ embeds: [embed], ephemeral: true });
   }
-});
 
+  if (!bv) bv = 'Không có dữ liệu';
+  if (!lspd) lspd = 'Không có dữ liệu';
+
+  const embed = new EmbedBuilder()
+    .setTitle('📊 TỔNG CHẤM CÔNG')
+    .addFields(
+      { name: '🏥 BỆNH VIỆN', value: bv, inline: false },
+      { name: '🚓 LSPD', value: lspd, inline: false }
+    )
+    .setColor('Blue');
+
+  return i.reply({ embeds: [embed], ephemeral: true });
+}
+});
 // ===== SERVER =====
 const app = express();
 app.get('/', (req, res) => res.send('Bot is running'));
 app.listen(process.env.PORT || 3000);
 
 // ===== LOGIN =====
-client.login(TOKEN);
+client.login(TOKEN).catch(err => {
+  console.log("❌ LOGIN ERROR:", err.message);
+});
