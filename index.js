@@ -59,11 +59,10 @@ function formatTime(ms) {
 }
 
 function formatDate(ts) {
-  const d = new Date(ts);
-  return d.toLocaleString('vi-VN');
+  return new Date(ts).toLocaleString('vi-VN');
 }
 
-// ===== TÍNH GIỜ ĐÊM =====
+// ===== GIỜ ĐÊM =====
 function calcDurationWithNightBonus(start, end) {
   let total = 0;
   let current = start;
@@ -99,13 +98,22 @@ client.on('messageCreate', async (msg) => {
     const row1 = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('benhvien').setLabel('🏥 Bệnh viện').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('lspd').setLabel('🚓 LSPD').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('end').setLabel('🔴 Kết thúc').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('tong').setLabel('📊 Tổng').setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId('end').setLabel('🔴 Kết thúc').setStyle(ButtonStyle.Danger)
+    );
+
+    const row2 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('tong_bv').setLabel('📊 Tổng BV').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('tong_lspd').setLabel('📊 Tổng LSPD').setStyle(ButtonStyle.Secondary)
+    );
+
+    const row3 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('reset_bv').setLabel('🔁 Reset BV').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('reset_lspd').setLabel('🔁 Reset LSPD').setStyle(ButtonStyle.Danger)
     );
 
     return msg.channel.send({
       embeds: [embed],
-      components: [row1]
+      components: [row1, row2, row3]
     });
   }
 
@@ -202,43 +210,88 @@ client.on('interactionCreate', async (i) => {
     return i.reply({ content: '📸 Gửi ảnh kết thúc', ephemeral: true });
   }
 
-  if (i.customId === 'tong') {
+  // ===== TỔNG BV =====
+  if (i.customId === 'tong_bv') {
 
     const rows = db.prepare(`
-      SELECT user_id, type, SUM(duration) as total
+      SELECT user_id, SUM(duration) as total
       FROM shifts
-      GROUP BY user_id, type
+      WHERE type='benhvien'
+      GROUP BY user_id
     `).all();
 
-    let bv = '';
-    let lspd = '';
+    let text = '';
+    let total = 0;
 
     for (const r of rows) {
-
       let name = r.user_id;
-
       const member = await i.guild.members.fetch(r.user_id).catch(() => null);
-
       if (member) name = member.displayName;
 
-      if (r.type === 'benhvien') {
-        bv += `👤 ${name}: ${formatTime(r.total)}\n`;
-      } else {
-        lspd += `👤 ${name}: ${formatTime(r.total)}\n`;
-      }
+      text += `👤 ${name}: ${formatTime(r.total)}\n`;
+      total += r.total;
     }
 
-    if (!bv) bv = 'Không có dữ liệu';
-    if (!lspd) lspd = 'Không có dữ liệu';
+    if (!text) text = 'Không có dữ liệu';
 
     const embed = new EmbedBuilder()
-      .setTitle('📊 TỔNG CHẤM CÔNG')
-      .addFields(
-        { name: '🏥 BỆNH VIỆN', value: bv },
-        { name: '🚓 LSPD', value: lspd }
-      );
+      .setTitle('🏥 TỔNG BỆNH VIỆN')
+      .setDescription(text)
+      .addFields({ name: '⏱ Tổng thời gian', value: formatTime(total) });
 
     return i.reply({ embeds: [embed], ephemeral: true });
+  }
+
+  // ===== TỔNG LSPD =====
+  if (i.customId === 'tong_lspd') {
+
+    const rows = db.prepare(`
+      SELECT user_id, SUM(duration) as total
+      FROM shifts
+      WHERE type='lspd'
+      GROUP BY user_id
+    `).all();
+
+    let text = '';
+    let total = 0;
+
+    for (const r of rows) {
+      let name = r.user_id;
+      const member = await i.guild.members.fetch(r.user_id).catch(() => null);
+      if (member) name = member.displayName;
+
+      text += `👤 ${name}: ${formatTime(r.total)}\n`;
+      total += r.total;
+    }
+
+    if (!text) text = 'Không có dữ liệu';
+
+    const embed = new EmbedBuilder()
+      .setTitle('🚓 TỔNG LSPD')
+      .setDescription(text)
+      .addFields({ name: '⏱ Tổng thời gian', value: formatTime(total) });
+
+    return i.reply({ embeds: [embed], ephemeral: true });
+  }
+
+  // ===== RESET BV =====
+  if (i.customId === 'reset_bv') {
+    if (!i.member.permissions.has("Administrator")) {
+      return i.reply({ content: "❌ Chỉ admin", ephemeral: true });
+    }
+
+    db.prepare(`DELETE FROM shifts WHERE type='benhvien'`).run();
+    return i.reply({ content: '✅ Đã reset BV', ephemeral: true });
+  }
+
+  // ===== RESET LSPD =====
+  if (i.customId === 'reset_lspd') {
+    if (!i.member.permissions.has("Administrator")) {
+      return i.reply({ content: "❌ Chỉ admin", ephemeral: true });
+    }
+
+    db.prepare(`DELETE FROM shifts WHERE type='lspd'`).run();
+    return i.reply({ content: '✅ Đã reset LSPD', ephemeral: true });
   }
 });
 
