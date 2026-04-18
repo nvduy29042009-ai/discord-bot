@@ -87,35 +87,40 @@ client.once('ready', () => {
 
 // ===== MENU =====
 client.on('messageCreate', async (msg) => {
-  if (msg.author.bot) return;
-
   if (msg.content === '!menu') {
 
-    const embed = new EmbedBuilder()
-      .setTitle('📋 BẢNG CHẤM CÔNG')
-      .setColor('Blue');
-
-    const row1 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('benhvien').setLabel('🏥 Bệnh viện').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('lspd').setLabel('🚓 LSPD').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('end').setLabel('🔴 Kết thúc').setStyle(ButtonStyle.Danger)
-    );
-
-    const row2 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('tong_bv').setLabel('📊 Tổng BV').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('tong_lspd').setLabel('📊 Tổng LSPD').setStyle(ButtonStyle.Secondary)
-    );
-
-    const row3 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('reset_bv').setLabel('🔁 Reset BV').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('reset_lspd').setLabel('🔁 Reset LSPD').setStyle(ButtonStyle.Danger)
-    );
-
-    return msg.channel.send({
-      embeds: [embed],
-      components: [row1, row2, row3]
-    });
+  // xoá menu cũ nếu có
+  if (menuMessage) {
+    try {
+      await menuMessage.delete();
+    } catch {}
   }
+
+  const embed = new EmbedBuilder()
+    .setTitle('📋 BẢNG CHẤM CÔNG')
+    .setColor('Blue');
+
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('benhvien').setLabel('🏥 Bệnh viện').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('lspd').setLabel('🚓 LSPD').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('end').setLabel('🔴 Kết thúc').setStyle(ButtonStyle.Danger)
+  );
+
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('tong_bv').setLabel('📊 Tổng BV').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('tong_lspd').setLabel('📊 Tổng LSPD').setStyle(ButtonStyle.Secondary)
+  );
+
+  const row3 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('reset_bv').setLabel('🔁 Reset BV').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('reset_lspd').setLabel('🔁 Reset LSPD').setStyle(ButtonStyle.Danger)
+  );
+
+  menuMessage = await msg.channel.send({
+    embeds: [embed],
+    components: [row1, row2, row3]
+  });
+}
 
   const id = msg.author.id;
   const pending = db.prepare(`SELECT * FROM pending WHERE user_id=?`).get(id);
