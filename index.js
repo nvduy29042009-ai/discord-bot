@@ -10,6 +10,7 @@ const {
 const Database = require('better-sqlite3');
 const express = require('express');
 
+// ===== TOKEN =====
 const TOKEN = process.env.TOKEN;
 
 if (!TOKEN) {
@@ -50,6 +51,9 @@ CREATE TABLE IF NOT EXISTS pending (
 )
 `).run();
 
+// ===== BIẾN MENU =====
+let menuMessage = null;
+
 // ===== FORMAT =====
 function formatTime(ms) {
   const m = Math.floor(ms / 60000);
@@ -62,7 +66,7 @@ function formatDate(ts) {
   return new Date(ts).toLocaleString('vi-VN');
 }
 
-// ===== GIỜ ĐÊM =====
+// ===== TÍNH GIỜ =====
 function calcDurationWithNightBonus(start, end) {
   let total = 0;
   let current = start;
@@ -87,47 +91,47 @@ client.once('ready', () => {
 
 // ===== MENU =====
 client.on('messageCreate', async (msg) => {
+  if (msg.author.bot) return;
+
   if (msg.content === '!menu') {
 
-  // xoá menu cũ nếu có
-  if (menuMessage) {
-    try {
-      await menuMessage.delete();
-    } catch {}
+    if (menuMessage) {
+      try { await menuMessage.delete(); } catch {}
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle('📋 BẢNG CHẤM CÔNG')
+      .setColor('Blue');
+
+    const row1 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('benhvien').setLabel('🏥 Bệnh viện').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('lspd').setLabel('🚓 LSPD').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('end').setLabel('🔴 Kết thúc').setStyle(ButtonStyle.Danger)
+    );
+
+    const row2 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('tong_bv').setLabel('📊 Tổng BV').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('tong_lspd').setLabel('📊 Tổng LSPD').setStyle(ButtonStyle.Secondary)
+    );
+
+    const row3 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('reset_bv').setLabel('🔁 Reset BV').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('reset_lspd').setLabel('🔁 Reset LSPD').setStyle(ButtonStyle.Danger)
+    );
+
+    menuMessage = await msg.channel.send({
+      embeds: [embed],
+      components: [row1, row2, row3]
+    });
+
+    return;
   }
 
-  const embed = new EmbedBuilder()
-    .setTitle('📋 BẢNG CHẤM CÔNG')
-    .setColor('Blue');
-
-  const row1 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('benhvien').setLabel('🏥 Bệnh viện').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('lspd').setLabel('🚓 LSPD').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('end').setLabel('🔴 Kết thúc').setStyle(ButtonStyle.Danger)
-  );
-
-  const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('tong_bv').setLabel('📊 Tổng BV').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('tong_lspd').setLabel('📊 Tổng LSPD').setStyle(ButtonStyle.Secondary)
-  );
-
-  const row3 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('reset_bv').setLabel('🔁 Reset BV').setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId('reset_lspd').setLabel('🔁 Reset LSPD').setStyle(ButtonStyle.Danger)
-  );
-
-  menuMessage = await msg.channel.send({
-    embeds: [embed],
-    components: [row1, row2, row3]
-  });
-}
-
+  // ===== XỬ LÝ ẢNH =====
   const id = msg.author.id;
   const pending = db.prepare(`SELECT * FROM pending WHERE user_id=?`).get(id);
 
   if (!pending) return;
-
-  await new Promise(r => setTimeout(r, 500));
 
   let attachment = msg.attachments.first();
 
@@ -136,7 +140,7 @@ client.on('messageCreate', async (msg) => {
   }
 
   if (!attachment) {
-    return msg.reply('📸 Gửi ảnh');
+    return msg.reply('📸 Gửi ảnh (file hoặc link)');
   }
 
   const img = attachment.url;
@@ -217,11 +221,9 @@ client.on('interactionCreate', async (i) => {
 
   // ===== TỔNG BV =====
   if (i.customId === 'tong_bv') {
-
     const rows = db.prepare(`
       SELECT user_id, SUM(duration) as total
-      FROM shifts
-      WHERE type='benhvien'
+      FROM shifts WHERE type='benhvien'
       GROUP BY user_id
     `).all();
 
@@ -242,18 +244,16 @@ client.on('interactionCreate', async (i) => {
     const embed = new EmbedBuilder()
       .setTitle('🏥 TỔNG BỆNH VIỆN')
       .setDescription(text)
-      .addFields({ name: '⏱ Tổng thời gian', value: formatTime(total) });
+      .addFields({ name: '⏱ Tổng', value: formatTime(total) });
 
     return i.reply({ embeds: [embed], ephemeral: true });
   }
 
   // ===== TỔNG LSPD =====
   if (i.customId === 'tong_lspd') {
-
     const rows = db.prepare(`
       SELECT user_id, SUM(duration) as total
-      FROM shifts
-      WHERE type='lspd'
+      FROM shifts WHERE type='lspd'
       GROUP BY user_id
     `).all();
 
@@ -274,35 +274,32 @@ client.on('interactionCreate', async (i) => {
     const embed = new EmbedBuilder()
       .setTitle('🚓 TỔNG LSPD')
       .setDescription(text)
-      .addFields({ name: '⏱ Tổng thời gian', value: formatTime(total) });
+      .addFields({ name: '⏱ Tổng', value: formatTime(total) });
 
     return i.reply({ embeds: [embed], ephemeral: true });
   }
 
-  // ===== RESET BV =====
+  // ===== RESET =====
   if (i.customId === 'reset_bv') {
     if (!i.member.permissions.has("Administrator")) {
       return i.reply({ content: "❌ Chỉ admin", ephemeral: true });
     }
-
     db.prepare(`DELETE FROM shifts WHERE type='benhvien'`).run();
-    return i.reply({ content: '✅ Đã reset BV', ephemeral: true });
+    return i.reply({ content: '✅ Reset BV', ephemeral: true });
   }
 
-  // ===== RESET LSPD =====
   if (i.customId === 'reset_lspd') {
     if (!i.member.permissions.has("Administrator")) {
       return i.reply({ content: "❌ Chỉ admin", ephemeral: true });
     }
-
     db.prepare(`DELETE FROM shifts WHERE type='lspd'`).run();
-    return i.reply({ content: '✅ Đã reset LSPD', ephemeral: true });
+    return i.reply({ content: '✅ Reset LSPD', ephemeral: true });
   }
 });
 
 // ===== SERVER =====
 const app = express();
-app.get('/', (req, res) => res.send('Bot is running'));
+app.get('/', (req, res) => res.send('Bot running'));
 app.listen(process.env.PORT || 3000);
 
 // ===== LOGIN =====
