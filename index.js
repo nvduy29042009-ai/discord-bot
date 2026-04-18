@@ -10,9 +10,8 @@ const {
 const Database = require('better-sqlite3');
 const express = require('express');
 
-// 🔥 CHỈ CẦN THAY TOKEN Ở ĐÂY
-const TOKEN = "MTQ5NDMzMTk5NDY0ODM0NjY0NA.G0PavT.EAl2ctMCUUpJHZRC0wpHf73Rx4ZV7__6OPDDlU";
-
+const TOKEN = process.env.TOKEN;
+console.log("TOKEN LENGTH:", TOKEN?.length);
 // ===== CHECK TOKEN =====
 if (!TOKEN) {
   console.log("❌ THIẾU TOKEN");
