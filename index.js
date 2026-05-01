@@ -281,7 +281,7 @@ client.on('interactionCreate', async (i) => {
 
   // ===== RESET =====
   if (i.customId === 'reset_bv') {
-    if (!i.member.permissions.has("Administrator")) {
+if (!i.member.roles.cache.some(r => r.name === "Admin")) {
       return i.reply({ content: "❌ Chỉ admin", ephemeral: true });
     }
     db.prepare(`DELETE FROM shifts WHERE type='benhvien'`).run();
