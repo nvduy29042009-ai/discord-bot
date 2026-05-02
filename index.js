@@ -4,7 +4,8 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  EmbedBuilder
+  EmbedBuilder,
+  PermissionsBitField
 } = require('discord.js');
 
 const Database = require('better-sqlite3');
@@ -62,8 +63,11 @@ function formatTime(ms) {
   return `${h} giờ ${mm} phút`;
 }
 
+// FIX TIMEZONE VN
 function formatDate(ts) {
-  return new Date(ts).toLocaleString('vi-VN');
+  return new Date(ts).toLocaleString('vi-VN', {
+    timeZone: 'Asia/Ho_Chi_Minh'
+  });
 }
 
 // ===== TÍNH GIỜ =====
@@ -100,22 +104,19 @@ client.on('messageCreate', async (msg) => {
     }
 
     const embed = new EmbedBuilder()
-      .setTitle('📋 BẢNG CHẤM CÔNG')
+      .setTitle('📋 BẢNG CHẤM CÔNG LSPD')
       .setColor('Blue');
 
     const row1 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('benhvien').setLabel('🏥 Bệnh viện').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('lspd').setLabel('🚓 LSPD').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('end').setLabel('🔴 Kết thúc').setStyle(ButtonStyle.Danger)
     );
 
     const row2 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('tong_bv').setLabel('📊 Tổng BV').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('tong_lspd').setLabel('📊 Tổng LSPD').setStyle(ButtonStyle.Secondary)
     );
 
     const row3 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('reset_bv').setLabel('🔁 Reset BV').setStyle(ButtonStyle.Danger),
       new ButtonBuilder().setCustomId('reset_lspd').setLabel('🔁 Reset LSPD').setStyle(ButtonStyle.Danger)
     );
 
@@ -165,7 +166,7 @@ client.on('messageCreate', async (msg) => {
     db.prepare(`DELETE FROM pending WHERE user_id=?`).run(id);
 
     msg.channel.send(
-`🟢 ${msg.author.username} vào ca ${pending.type.toUpperCase()}
+`🟢 ${msg.author.username} vào ca LSPD
 🕒 ${formatDate(now)}`
     );
   }
@@ -190,7 +191,7 @@ client.on('messageCreate', async (msg) => {
     db.prepare(`DELETE FROM pending WHERE user_id=?`).run(id);
 
     msg.channel.send(
-`🔴 ${msg.author.username} kết thúc (${row.type})
+`🔴 ${msg.author.username} kết thúc (LSPD)
 🕒 Vào: ${formatDate(row.start_time)}
 🕒 Ra: ${formatDate(endTime)}
 ⏱ ${formatTime(duration)}`
@@ -204,11 +205,6 @@ client.on('interactionCreate', async (i) => {
 
   const id = i.user.id;
 
-  if (i.customId === 'benhvien') {
-    db.prepare(`INSERT OR REPLACE INTO pending VALUES (?, ?, ?)`).run(id, 'start', 'benhvien');
-    return i.reply({ content: '📸 Gửi ảnh vào ca BV', ephemeral: true });
-  }
-
   if (i.customId === 'lspd') {
     db.prepare(`INSERT OR REPLACE INTO pending VALUES (?, ?, ?)`).run(id, 'start', 'lspd');
     return i.reply({ content: '📸 Gửi ảnh vào ca LSPD', ephemeral: true });
@@ -217,36 +213,6 @@ client.on('interactionCreate', async (i) => {
   if (i.customId === 'end') {
     db.prepare(`INSERT OR REPLACE INTO pending VALUES (?, ?, ?)`).run(id, 'end', null);
     return i.reply({ content: '📸 Gửi ảnh kết thúc', ephemeral: true });
-  }
-
-  // ===== TỔNG BV =====
-  if (i.customId === 'tong_bv') {
-    const rows = db.prepare(`
-      SELECT user_id, SUM(duration) as total
-      FROM shifts WHERE type='benhvien'
-      GROUP BY user_id
-    `).all();
-
-    let text = '';
-    let total = 0;
-
-    for (const r of rows) {
-      let name = r.user_id;
-      const member = await i.guild.members.fetch(r.user_id).catch(() => null);
-      if (member) name = member.displayName;
-
-      text += `👤 ${name}: ${formatTime(r.total)}\n`;
-      total += r.total;
-    }
-
-    if (!text) text = 'Không có dữ liệu';
-
-    const embed = new EmbedBuilder()
-      .setTitle('🏥 TỔNG BỆNH VIỆN')
-      .setDescription(text)
-      .addFields({ name: '⏱ Tổng', value: formatTime(total) });
-
-    return i.reply({ embeds: [embed], ephemeral: true });
   }
 
   // ===== TỔNG LSPD =====
@@ -280,18 +246,11 @@ client.on('interactionCreate', async (i) => {
   }
 
   // ===== RESET =====
-  if (i.customId === 'reset_bv') {
-if (!i.member.roles.cache.some(r => r.name === "Admin")) {
-      return i.reply({ content: "❌ Chỉ admin", ephemeral: true });
-    }
-    db.prepare(`DELETE FROM shifts WHERE type='benhvien'`).run();
-    return i.reply({ content: '✅ Reset BV', ephemeral: true });
-  }
-
   if (i.customId === 'reset_lspd') {
-    if (!i.member.permissions.has("Administrator")) {
+    if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
       return i.reply({ content: "❌ Chỉ admin", ephemeral: true });
     }
+
     db.prepare(`DELETE FROM shifts WHERE type='lspd'`).run();
     return i.reply({ content: '✅ Reset LSPD', ephemeral: true });
   }
