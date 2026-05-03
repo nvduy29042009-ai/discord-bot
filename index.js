@@ -24,7 +24,8 @@ const db = new Database('data.db');
 
 const ALLOWED_ROLES = [
   "Phó Cục trưởng LSPD",
-  "Cục trưởng LSPD"
+  "Cục trưởng LSPD",
+  "Phòng Hành Chánh"
 ];
 
 // ===== DATABASE =====
@@ -63,12 +64,48 @@ function formatDate(ts) {
   });
 }
 
-// ===== CHECK ROLE =====
+// ===== PERMISSION =====
 function hasPermission(member) {
   return member.roles.cache.some(r => ALLOWED_ROLES.includes(r.name));
 }
 
-// ===== TÍNH GIỜ X2 =====
+// ===== COUNT ON DUTY =====
+function getOnDutyCount() {
+  const rows = db.prepare(`
+    SELECT DISTINCT user_id 
+    FROM shifts 
+    WHERE type='lspd' AND end_time IS NULL
+  `).all();
+
+  return rows.length;
+}
+
+// ===== UPDATE STATUS =====
+function updateBotStatus() {
+  if (!client.user) return;
+
+  client.user.setActivity({
+    name: `LSPD GTAGO | ${getOnDutyCount()} PD ĐANG TRỰC`,
+    type: 3
+  });
+}
+
+// ===== UPDATE MENU =====
+function updateMenu() {
+  if (!menuMessage) return;
+
+  const embed = new EmbedBuilder()
+    .setTitle('📋 BẢNG CHẤM CÔNG L.S.P.D')
+    .setColor('Blue')
+    .addFields({
+      name: '👮 On Duty',
+      value: `${getOnDutyCount()} PD đang trực`
+    });
+
+  menuMessage.edit({ embeds: [embed] }).catch(() => {});
+}
+
+// ===== CALC TIME =====
 function calcDurationWithNightBonus(start, end) {
   let total = 0;
   let current = start;
@@ -90,6 +127,12 @@ function calcDurationWithNightBonus(start, end) {
 // ===== READY =====
 client.once('ready', () => {
   console.log('✅ BOT READY');
+  updateBotStatus();
+
+  setInterval(() => {
+    updateBotStatus();
+    updateMenu();
+  }, 15000);
 });
 
 // ===== MENU =====
@@ -103,21 +146,25 @@ client.on('messageCreate', async (msg) => {
     }
 
     const embed = new EmbedBuilder()
-      .setTitle('📋 BẢNG CHẤM CÔNG LSPD')
-      .setColor('Blue');
+      .setTitle('📋 BẢNG CHẤM CÔNG L.S.P.D')
+      .setColor('Blue')
+      .addFields({
+        name: '👮 On Duty',
+        value: `${getOnDutyCount()} PD đang trực`
+      });
 
     const row1 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('lspd').setLabel('🟢 Vào ca trực').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('end').setLabel('🔴 Kết thúc ca trực').setStyle(ButtonStyle.Danger)
+      new ButtonBuilder().setCustomId('lspd').setLabel('🟢 VÀO CA TRỰC').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('end').setLabel('🔴 KẾT THÚC CA TRỰC').setStyle(ButtonStyle.Danger)
     );
 
     const row2 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('tong_lspd').setLabel('📊 Tổng time').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('add_shift').setLabel('➕ Thêm giờ').setStyle(ButtonStyle.Primary)
+      new ButtonBuilder().setCustomId('tong_lspd').setLabel('📊 TỔNG TIME').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('add_shift').setLabel('➕ THÊM GIỜ').setStyle(ButtonStyle.Primary)
     );
 
     const row3 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('reset_lspd').setLabel('🔁 Reset').setStyle(ButtonStyle.Danger)
+      new ButtonBuilder().setCustomId('reset_lspd').setLabel('🔁 RESET').setStyle(ButtonStyle.Danger)
     );
 
     menuMessage = await msg.channel.send({
@@ -135,34 +182,48 @@ client.on('interactionCreate', async (i) => {
 
   if (i.customId === 'lspd') {
     db.prepare(`INSERT OR REPLACE INTO pending VALUES (?, ?, ?)`).run(id, 'start', 'lspd');
-    return i.reply({ content: '📸 Gửi ảnh vào ca', ephemeral: true });
+    return i.reply({ content: '📸 GỬI ẢNH VÀO CA', ephemeral: true });
   }
 
   if (i.customId === 'end') {
     db.prepare(`INSERT OR REPLACE INTO pending VALUES (?, ?, ?)`).run(id, 'end', null);
-    return i.reply({ content: '📸 Gửi ảnh kết thúc', ephemeral: true });
+    return i.reply({ content: '📸 GỬI ẢNH KẾT THÚC', ephemeral: true });
   }
 
-  // ===== THÊM GIỜ =====
-  if (i.customId === 'add_shift') {
+  // ===== RESET CONFIRM =====
+  if (i.customId === 'reset_lspd') {
     if (!hasPermission(i.member)) {
-      return i.reply({ content: "❌ Không có quyền", ephemeral: true });
+      return i.reply({ content: "❌ KHÔNG CÓ QUYỀN", ephemeral: true });
     }
 
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('confirm_reset').setLabel('✅ XÁC NHẬN').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('cancel_reset').setLabel('❌ HỦY').setStyle(ButtonStyle.Secondary)
+    );
+
     return i.reply({
-      content: `Nhập theo dạng:\n@user 3 (số giờ)`,
+      content: '⚠️ BẠN CÓ CHẮC CHẮN RESET?',
+      components: [row],
       ephemeral: true
     });
   }
 
-  // ===== RESET =====
-  if (i.customId === 'reset_lspd') {
-    if (!hasPermission(i.member)) {
-      return i.reply({ content: "❌ Không có quyền", ephemeral: true });
-    }
-
+  if (i.customId === 'confirm_reset') {
     db.prepare(`DELETE FROM shifts WHERE type='lspd'`).run();
-    return i.reply({ content: '✅ Đã reset', ephemeral: true });
+    updateBotStatus();
+    updateMenu();
+
+    return i.update({
+      content: '✅ ĐÃ RESET',
+      components: []
+    });
+  }
+
+  if (i.customId === 'cancel_reset') {
+    return i.update({
+      content: '❌ ĐÃ HỦY',
+      components: []
+    });
   }
 
   // ===== TỔNG =====
@@ -196,24 +257,21 @@ client.on('interactionCreate', async (i) => {
   }
 });
 
-// ===== THÊM GIỜ BẰNG TEXT =====
+// ===== ADD TIME =====
 client.on('messageCreate', async (msg) => {
   if (!msg.mentions.users.size) return;
   if (!hasPermission(msg.member)) return;
 
   const args = msg.content.split(' ');
-  if (args.length < 2) return;
-
   const user = msg.mentions.users.first();
   const hours = parseFloat(args[1]);
 
   if (isNaN(hours) || hours <= 0) {
-    return msg.reply("❌ Nhập số giờ hợp lệ. Ví dụ: @user 3");
+    return msg.reply("❌ Ví dụ: @user 3");
   }
 
   const endTime = Date.now();
   const startTime = endTime - (hours * 60 * 60 * 1000);
-
   const duration = calcDurationWithNightBonus(startTime, endTime);
 
   db.prepare(`
@@ -221,10 +279,10 @@ client.on('messageCreate', async (msg) => {
     VALUES (?, 'lspd', ?, ?, ?)
   `).run(user.id, startTime, endTime, duration);
 
-  msg.reply(`✅ Đã thêm ${hours} giờ cho ${user.username}`);
+  msg.reply(`✅ Đã thêm ${hours} giờ`);
 });
 
-// ===== XỬ LÝ ẢNH =====
+// ===== HANDLE IMAGE =====
 client.on('messageCreate', async (msg) => {
   const pending = db.prepare(`SELECT * FROM pending WHERE user_id=?`).get(msg.author.id);
   if (!pending) return;
@@ -233,6 +291,15 @@ client.on('messageCreate', async (msg) => {
 
   if (pending.action === 'start') {
 
+    const existing = db.prepare(`
+      SELECT * FROM shifts WHERE user_id=? AND end_time IS NULL
+    `).get(msg.author.id);
+
+    if (existing) {
+      db.prepare(`DELETE FROM pending WHERE user_id=?`).run(msg.author.id);
+      return msg.reply('❌ ĐANG TRONG CA');
+    }
+
     db.prepare(`
       INSERT INTO shifts (user_id, type, start_time)
       VALUES (?, ?, ?)
@@ -240,24 +307,21 @@ client.on('messageCreate', async (msg) => {
 
     db.prepare(`DELETE FROM pending WHERE user_id=?`).run(msg.author.id);
 
-    const embed = new EmbedBuilder()
-      .setColor('Green')
-      .setTitle('🟢 VÀO CA')
-      .addFields(
-        { name: '👤 Nhân sự', value: msg.author.username },
-        { name: '🕒 Thời gian', value: formatDate(now) }
-      );
+    msg.channel.send({ content: `🟢 ${msg.author.username} đã vào ca` });
 
-    msg.channel.send({ embeds: [embed] });
+    updateBotStatus();
+    updateMenu();
   }
 
   else if (pending.action === 'end') {
 
-    const row = db.prepare(`SELECT * FROM shifts WHERE user_id=? AND end_time IS NULL`).get(msg.author.id);
+    const row = db.prepare(`
+      SELECT * FROM shifts WHERE user_id=? AND end_time IS NULL
+    `).get(msg.author.id);
 
     if (!row) {
       db.prepare(`DELETE FROM pending WHERE user_id=?`).run(msg.author.id);
-      return msg.reply('❌ Bạn chưa vào ca');
+      return msg.reply('❌ CHƯA VÀO CA');
     }
 
     const endTime = Date.now();
@@ -269,17 +333,10 @@ client.on('messageCreate', async (msg) => {
 
     db.prepare(`DELETE FROM pending WHERE user_id=?`).run(msg.author.id);
 
-    const embed = new EmbedBuilder()
-      .setColor('Red')
-      .setTitle('🔴 KẾT THÚC CA')
-      .addFields(
-        { name: '👤 Nhân sự', value: msg.author.username },
-        { name: '🕒 Vào', value: formatDate(row.start_time) },
-        { name: '🕒 Ra', value: formatDate(endTime) },
-        { name: '⏱ Thời gian', value: formatTime(duration) }
-      );
+    msg.channel.send({ content: `🔴 ${msg.author.username} đã kết thúc ca` });
 
-    msg.channel.send({ embeds: [embed] });
+    updateBotStatus();
+    updateMenu();
   }
 });
 
