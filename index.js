@@ -23,8 +23,8 @@ const client = new Client({
 const db = new Database('data.db');
 
 const ALLOWED_ROLES = [
-  "Phó Cục Trưởng LSPD",
-  "Cục Trưởng LSPD"
+  "Phó Cục trưởng LSPD",
+  "Cục trưởng LSPD"
 ];
 
 // ===== DATABASE =====
