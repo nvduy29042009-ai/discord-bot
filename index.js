@@ -126,7 +126,7 @@ client.on('messageCreate', async (msg) => {
     }
 
     const embed = new EmbedBuilder()
-      .setTitle('📋 BẢNG CHẤM CÔNG')
+      .setTitle('📋 BẢNG CHẤM CÔNG L.S.P.D')
       .setColor('Blue')
       .addFields({
         name: '👮 On Duty',
@@ -134,11 +134,11 @@ client.on('messageCreate', async (msg) => {
       });
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('start').setLabel('🟢 VÀO CA').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('end').setLabel('🔴 KẾT THÚC').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('tong').setLabel('📊 TỔNG GIỜ').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('cars').setLabel('🚗 TỔNG XE').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('reset').setLabel('🔁 RESET').setStyle(ButtonStyle.Danger)
+      new ButtonBuilder().setCustomId('start').setLabel('🟢 VÀO CA TRỰC').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('end').setLabel('🔴 KẾT THÚC CA TRỰC').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('tong').setLabel('📊 TỔNG GIỜ ONDUTY').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('cars').setLabel('🚗 TỔNG GIAM XE').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('reset').setLabel('🔁 RESET CA VÀ XE').setStyle(ButtonStyle.Danger)
     );
 
     menuMessage = await msg.channel.send({
@@ -182,7 +182,7 @@ client.on('interactionCreate', async (i) => {
     return i.reply({
       embeds: [
         new EmbedBuilder()
-          .setTitle('📊 TỔNG GIỜ')
+          .setTitle('📊 TỔNG GIỜ ONDUTY')
           .setDescription(text || 'Không có dữ liệu')
           .addFields({ name: 'Tổng', value: formatTime(total) })
       ],
@@ -206,7 +206,7 @@ client.on('interactionCreate', async (i) => {
     return i.reply({
       embeds: [
         new EmbedBuilder()
-          .setTitle('🚗 TỔNG XE GIAM')
+          .setTitle('🚗 TỔNG GIAM XE')
           .setDescription(text || 'Không có dữ liệu')
       ],
       ephemeral: false
@@ -226,7 +226,36 @@ client.on('interactionCreate', async (i) => {
   }
 });
 
-// ===== HANDLE ẢNH =====
+// ===== ADD GIỜ =====
+client.on('messageCreate', async (msg) => {
+  if (msg.author.bot) return;
+  if (!msg.content.startsWith('!add')) return;
+
+  if (!hasPermission(msg.member)) {
+    return msg.reply("❌ Không có quyền");
+  }
+
+  const args = msg.content.split(' ');
+  const user = msg.mentions.users.first();
+  const hours = parseFloat(args[2]);
+
+  if (!user || isNaN(hours) || hours <= 0) {
+    return msg.reply("❌ Dùng: !add @user 3");
+  }
+
+  const endTime = Date.now();
+  const startTime = endTime - (hours * 60 * 60 * 1000);
+  const duration = calcDurationWithNightBonus(startTime, endTime);
+
+  db.prepare(`
+    INSERT INTO shifts (user_id, start_time, end_time, duration)
+    VALUES (?, ?, ?, ?)
+  `).run(user.id, startTime, endTime, duration);
+
+  msg.reply(`✅ Đã cộng ${hours} giờ cho <@${user.id}>`);
+});
+
+// ===== HANDLE ẢNH (KHÔNG XOÁ ẢNH – TRÁNH LỖI) =====
 client.on('messageCreate', async (msg) => {
   if (msg.author.bot) return;
 
@@ -255,10 +284,6 @@ client.on('messageCreate', async (msg) => {
     if (attachment) embed.setImage(attachment.url);
 
     msg.channel.send({ embeds: [embed] });
-
-    // xoá ảnh gốc
-    msg.delete().catch(() => {});
-
     updateBotStatus();
   }
 
@@ -292,10 +317,6 @@ client.on('messageCreate', async (msg) => {
     if (attachment) embed.setImage(attachment.url);
 
     msg.channel.send({ embeds: [embed] });
-
-    // xoá ảnh gốc
-    msg.delete().catch(() => {});
-
     updateBotStatus();
   }
 });
