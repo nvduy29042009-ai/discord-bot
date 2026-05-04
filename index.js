@@ -13,8 +13,6 @@ const Database = require('better-sqlite3');
 const express = require('express');
 
 const TOKEN = process.env.TOKEN;
-
-// 🚗 CHANNEL GIAM XE (ID bạn đưa)
 const CAR_CHANNEL_ID = "1500703920992030731";
 
 // ===== BOT =====
@@ -166,7 +164,7 @@ client.on('interactionCreate', async (i) => {
     return i.reply({ content: '📸 GỬI ẢNH KẾT THÚC', ephemeral: true });
   }
 
-  // 📊 TỔNG GIỜ (CÔNG KHAI)
+  // 📊 TỔNG GIỜ (PUBLIC)
   if (i.customId === 'tong') {
     const rows = db.prepare(`
       SELECT user_id, SUM(duration) as total
@@ -192,7 +190,7 @@ client.on('interactionCreate', async (i) => {
     });
   }
 
-  // 🚗 TỔNG XE (CÔNG KHAI)
+  // 🚗 TỔNG XE (PUBLIC)
   if (i.customId === 'cars') {
     const rows = db.prepare(`
       SELECT user_id, COUNT(*) as total
@@ -252,12 +250,13 @@ client.on('messageCreate', async (msg) => {
       .addFields(
         { name: '👤 Nhân sự', value: msg.author.username },
         { name: '🕒 Thời gian', value: getVNTime(now) }
-      )
-      .setImage(attachment?.url || null);
+      );
+
+    if (attachment) embed.setImage(attachment.url);
 
     msg.channel.send({ embeds: [embed] });
 
-    // 🧹 XOÁ ẢNH
+    // xoá ảnh gốc
     msg.delete().catch(() => {});
 
     updateBotStatus();
@@ -288,12 +287,13 @@ client.on('messageCreate', async (msg) => {
         { name: '🕒 Vào', value: getVNTime(row.start_time) },
         { name: '🕒 Ra', value: getVNTime(endTime) },
         { name: '⏱ Thời gian', value: formatTime(duration) }
-      )
-      .setImage(attachment?.url || null);
+      );
+
+    if (attachment) embed.setImage(attachment.url);
 
     msg.channel.send({ embeds: [embed] });
 
-    // 🧹 XOÁ ẢNH
+    // xoá ảnh gốc
     msg.delete().catch(() => {});
 
     updateBotStatus();
@@ -309,8 +309,6 @@ client.on('messageCreate', async (msg) => {
 
   db.prepare(`INSERT INTO cars (user_id) VALUES (?)`)
     .run(msg.author.id);
-
-  console.log(`+1 xe: ${msg.author.username}`);
 });
 
 // ===== READY =====
