@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const {
   Client,
   GatewayIntentBits,
@@ -11,7 +13,9 @@ const Database = require('better-sqlite3');
 const express = require('express');
 
 const TOKEN = process.env.TOKEN;
+const CAR_CHANNEL_ID = "1492541035530686596";
 
+// ===== BOT =====
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -21,6 +25,7 @@ const client = new Client({
 });
 
 const db = new Database('data.db');
+
 let menuMessage = null;
 
 // ===== ROLE =====
@@ -33,9 +38,6 @@ const ALLOWED_ROLES = [
 function hasPermission(member) {
   return member.roles.cache.some(r => ALLOWED_ROLES.includes(r.name));
 }
-
-// ===== CONFIG =====
-const IMPOUND_CHANNEL_ID = '1492541035530686596';
 
 // ===== FORMAT =====
 function formatTime(ms) {
@@ -51,7 +53,7 @@ function getVNTime(ts) {
   });
 }
 
-// ===== TIME =====
+// ===== X2 BAN ĐÊM =====
 function calcDurationWithNightBonus(start, end) {
   let total = 0;
   let current = start;
@@ -76,38 +78,39 @@ function calcDurationWithNightBonus(start, end) {
 }
 
 // ===== DATABASE =====
-db.prepare(`CREATE TABLE IF NOT EXISTS shifts (
+db.prepare(`
+CREATE TABLE IF NOT EXISTS shifts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id TEXT,
   start_time INTEGER,
   end_time INTEGER,
   duration INTEGER
-)`).run();
+)
+`).run();
 
-db.prepare(`CREATE TABLE IF NOT EXISTS pending (
+db.prepare(`
+CREATE TABLE IF NOT EXISTS pending (
   user_id TEXT PRIMARY KEY,
   action TEXT
-)`).run();
+)
+`).run();
 
-db.prepare(`CREATE TABLE IF NOT EXISTS impounds (
-  user_id TEXT PRIMARY KEY,
-  count INTEGER
-)`).run();
-
-// ===== ĐANG TRỰC =====
-function getOnDutyCount() {
-  const rows = db.prepare(`SELECT * FROM shifts WHERE end_time IS NULL`).all();
-  return rows.length;
-}
+// 🚗 XE THEO NGƯỜI
+db.prepare(`
+CREATE TABLE IF NOT EXISTS cars (
+  user_id TEXT
+)
+`).run();
 
 // ===== STATUS =====
+function getOnDutyCount() {
+  return db.prepare(`SELECT COUNT(*) as c FROM shifts WHERE end_time IS NULL`).get().c;
+}
+
 function updateBotStatus() {
   if (!client.user) return;
-
-  const count = getOnDutyCount();
-
   client.user.setActivity({
-    name: `LSPD GTAGO | ${count} PD ĐANG TRỰC`,
+    name: `${getOnDutyCount()} người đang trực`,
     type: 3
   });
 }
@@ -117,23 +120,33 @@ client.on('messageCreate', async (msg) => {
   if (msg.author.bot) return;
 
   if (msg.content === '!menu') {
+
     await msg.delete().catch(() => {});
-    if (menuMessage) await menuMessage.delete().catch(() => {});
+
+    if (menuMessage) {
+      try { await menuMessage.delete(); } catch {}
+    }
 
     const embed = new EmbedBuilder()
       .setTitle('📋 BẢNG CHẤM CÔNG')
       .setColor('Blue')
-      .addFields({ name: '👮 On Duty', value: `${getOnDutyCount()} người` });
+      .addFields({
+        name: '👮 On Duty',
+        value: `${getOnDutyCount()} người`
+      });
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('start').setLabel('🟢 VÀO CA').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('end').setLabel('🔴 KẾT THÚC').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('tong').setLabel('📊 TỔNG').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('reset').setLabel('🔁 RESET CA').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('reset_impound').setLabel('🚓 RESET XE').setStyle(ButtonStyle.Danger)
+      new ButtonBuilder().setCustomId('tong').setLabel('📊 TỔNG GIỜ').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('cars').setLabel('🚗 TỔNG XE').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('reset').setLabel('🔁 RESET').setStyle(ButtonStyle.Danger)
     );
 
-    menuMessage = await msg.channel.send({ embeds: [embed], components: [row] });
+    menuMessage = await msg.channel.send({
+      embeds: [embed],
+      components: [row]
+    });
   }
 });
 
@@ -154,75 +167,94 @@ client.on('interactionCreate', async (i) => {
   }
 
   if (i.customId === 'tong') {
-    const rows = db.prepare(`SELECT user_id, SUM(duration) as total FROM shifts GROUP BY user_id`).all();
+    const rows = db.prepare(`
+      SELECT user_id, SUM(duration) as total
+      FROM shifts GROUP BY user_id
+    `).all();
+
+    let text = '';
+    let total = 0;
+
+    for (const r of rows) {
+      text += `<@${r.user_id}>: ${formatTime(r.total)}\n`;
+      total += r.total;
+    }
+
+    return i.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle('📊 TỔNG GIỜ')
+          .setDescription(text || 'Không có dữ liệu')
+          .addFields({ name: 'Tổng', value: formatTime(total) })
+      ],
+      ephemeral: true
+    });
+  }
+
+  // 🚗 TỔNG XE
+  if (i.customId === 'cars') {
+    const rows = db.prepare(`
+      SELECT user_id, COUNT(*) as total
+      FROM cars
+      GROUP BY user_id
+    `).all();
 
     let text = '';
 
     for (const r of rows) {
-      const imp = db.prepare(`SELECT count FROM impounds WHERE user_id=?`).get(r.user_id);
-      text += `<@${r.user_id}>: ${formatTime(r.total || 0)} | 🚓 ${imp ? imp.count : 0}\n`;
+      text += `<@${r.user_id}>: ${r.total} xe\n`;
     }
 
     return i.reply({
-      embeds: [new EmbedBuilder().setTitle('📊 TỔNG CHUNG').setDescription(text || 'Không có dữ liệu')]
+      embeds: [
+        new EmbedBuilder()
+          .setTitle('🚗 TỔNG XE GIAM')
+          .setDescription(text || 'Không có dữ liệu')
+      ],
+      ephemeral: true
     });
   }
 
-  // RESET CA
+  // 🔁 RESET
   if (i.customId === 'reset') {
-    if (!hasPermission(i.member)) return i.reply({ content: "❌ Không có quyền", ephemeral: true });
+    if (!hasPermission(i.member)) {
+      return i.reply({ content: "❌ Không có quyền", ephemeral: true });
+    }
 
     db.prepare(`DELETE FROM shifts`).run();
-    return i.reply({ content: '✅ Đã reset ca', ephemeral: true });
-  }
+    db.prepare(`DELETE FROM cars`).run();
 
-  // RESET XE
-  if (i.customId === 'reset_impound') {
-    if (!hasPermission(i.member)) return i.reply({ content: "❌ Không có quyền", ephemeral: true });
-
-    db.prepare(`DELETE FROM impounds`).run();
-    return i.reply({ content: '🚓 Đã reset xe', ephemeral: true });
+    return i.reply({ content: "🔁 Đã reset toàn bộ (ca + xe)", ephemeral: true });
   }
 });
 
-// ===== !TONGXE =====
+// ===== ADD GIỜ =====
 client.on('messageCreate', async (msg) => {
   if (msg.author.bot) return;
-  if (msg.content !== '!tongxe') return;
+  if (!msg.content.startsWith('!add')) return;
+  if (!hasPermission(msg.member)) return;
 
-  const rows = db.prepare(`SELECT * FROM impounds`).all();
+  const args = msg.content.split(' ');
+  const user = msg.mentions.users.first();
+  const hours = parseFloat(args[2]);
 
-  let text = '';
-  for (const r of rows) {
-    text += `<@${r.user_id}>: 🚓 ${r.count}\n`;
+  if (!user || isNaN(hours) || hours <= 0) {
+    return msg.reply("❌ Dùng: !add @user 3");
   }
 
-  msg.channel.send({
-    embeds: [new EmbedBuilder().setTitle('🚓 TỔNG GIAM XE').setDescription(text || 'Không có dữ liệu')]
-  });
+  const endTime = Date.now();
+  const startTime = endTime - (hours * 60 * 60 * 1000);
+  const duration = calcDurationWithNightBonus(startTime, endTime);
+
+  db.prepare(`
+    INSERT INTO shifts (user_id, start_time, end_time, duration)
+    VALUES (?, ?, ?, ?)
+  `).run(user.id, startTime, endTime, duration);
+
+  msg.reply(`✅ Đã thêm ${hours} giờ cho <@${user.id}>`);
 });
 
-// ===== GIAM XE =====
-client.on('messageCreate', async (msg) => {
-  if (msg.author.bot) return;
-  if (msg.channel.id !== IMPOUND_CHANNEL_ID) return;
-  if (!msg.attachments.size) return;
-
-  const row = db.prepare(`SELECT * FROM impounds WHERE user_id=?`).get(msg.author.id);
-
-  let count = 1;
-  if (row) {
-    count = row.count + 1;
-    db.prepare(`UPDATE impounds SET count=? WHERE user_id=?`).run(count, msg.author.id);
-  } else {
-    db.prepare(`INSERT INTO impounds VALUES (?, ?)`).run(msg.author.id, 1);
-  }
-
-  msg.react('🚓');
-  msg.reply(`🚓 Bạn đã giam tổng cộng **${count} xe**`);
-});
-
-// ===== HANDLE CA =====
+// ===== HANDLE ẢNH =====
 client.on('messageCreate', async (msg) => {
   if (msg.author.bot) return;
 
@@ -233,59 +265,78 @@ client.on('messageCreate', async (msg) => {
   const attachment = msg.attachments.first();
 
   if (pending.action === 'start') {
-    db.prepare(`INSERT INTO shifts (user_id, start_time) VALUES (?, ?)`).run(msg.author.id, now);
+
+    db.prepare(`INSERT INTO shifts (user_id, start_time) VALUES (?, ?)`)
+      .run(msg.author.id, now);
+
     db.prepare(`DELETE FROM pending WHERE user_id=?`).run(msg.author.id);
 
-    msg.channel.send({
-      embeds: [new EmbedBuilder()
-        .setColor('Green')
-        .setTitle('🟢 VÀO CA')
-        .addFields(
-          { name: '👤 Nhân sự', value: msg.author.username },
-          { name: '🕒 Thời gian', value: getVNTime(now) }
-        )
-        .setImage(attachment?.url || null)]
-    });
+    const embed = new EmbedBuilder()
+      .setColor('Green')
+      .setTitle('🟢 VÀO CA')
+      .setThumbnail(msg.author.displayAvatarURL())
+      .addFields(
+        { name: '👤 Nhân sự', value: msg.author.username },
+        { name: '🕒 Thời gian', value: getVNTime(now) }
+      )
+      .setImage(attachment?.url || null);
 
+    msg.channel.send({ embeds: [embed] });
     updateBotStatus();
   }
 
-  if (pending.action === 'end') {
-    const row = db.prepare(`SELECT * FROM shifts WHERE user_id=? AND end_time IS NULL`).get(msg.author.id);
+  else if (pending.action === 'end') {
+
+    const row = db.prepare(`SELECT * FROM shifts WHERE user_id=? AND end_time IS NULL`)
+      .get(msg.author.id);
+
     if (!row) return msg.reply('❌ CHƯA VÀO CA');
 
-    const end = now;
-    const duration = calcDurationWithNightBonus(row.start_time, end);
+    const endTime = now;
+    const duration = calcDurationWithNightBonus(row.start_time, endTime);
 
-    db.prepare(`UPDATE shifts SET end_time=?, duration=? WHERE id=?`).run(end, duration, row.id);
+    db.prepare(`
+      UPDATE shifts SET end_time=?, duration=? WHERE id=?
+    `).run(endTime, duration, row.id);
+
     db.prepare(`DELETE FROM pending WHERE user_id=?`).run(msg.author.id);
 
-    msg.channel.send({
-      embeds: [new EmbedBuilder()
-        .setColor('Red')
-        .setTitle('🔴 KẾT THÚC CA')
-        .addFields(
-          { name: '👤 Nhân sự', value: msg.author.username },
-          { name: '🕒 Vào', value: getVNTime(row.start_time) },
-          { name: '🕒 Ra', value: getVNTime(end) },
-          { name: '⏱ Thời gian', value: formatTime(duration) }
-        )
-        .setImage(attachment?.url || null)]
-    });
+    const embed = new EmbedBuilder()
+      .setColor('Red')
+      .setTitle('🔴 KẾT THÚC CA')
+      .setThumbnail(msg.author.displayAvatarURL())
+      .addFields(
+        { name: '👤 Nhân sự', value: msg.author.username },
+        { name: '🕒 Vào', value: getVNTime(row.start_time) },
+        { name: '🕒 Ra', value: getVNTime(endTime) },
+        { name: '⏱ Thời gian', value: formatTime(duration) }
+      )
+      .setImage(attachment?.url || null);
 
+    msg.channel.send({ embeds: [embed] });
     updateBotStatus();
   }
+});
+
+// ===== 🚗 ĐẾM XE (CHỈ TÍNH KHI CÓ ẢNH) =====
+client.on('messageCreate', async (msg) => {
+  if (msg.author.bot) return;
+
+  if (msg.channel.id === CAR_CHANNEL_ID && msg.attachments.size > 0) {
+    db.prepare(`INSERT INTO cars (user_id) VALUES (?)`)
+      .run(msg.author.id);
+  }
+});
+
+// ===== READY =====
+client.once('ready', () => {
+  console.log('✅ BOT READY');
+  updateBotStatus();
 });
 
 // ===== SERVER =====
 const app = express();
-app.get('/', (req, res) => res.send('OK'));
-app.listen(3000);
-
-// ===== READY =====
-client.once('ready', () => {
-  console.log('READY');
-  updateBotStatus();
-});
+app.get('/', (req, res) => res.send('Bot running'));
+app.listen(process.env.PORT || 3000);
 
 client.login(TOKEN);
