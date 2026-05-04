@@ -8,8 +8,12 @@
   "dependencies": {
     "discord.js": "^14.14.1",
     "better-sqlite3": "^9.4.0",
+<<<<<<< HEAD
     "express": "^4.19.2",
     "exceljs": "^4.3.0"
+=======
+    "express": "^4.19.2"
+>>>>>>> 500d38c5ed932d6c9c951c3bc60a90a54e4ab2a8
   },
   "description": "",
   "devDependencies": {},
@@ -17,4 +21,8 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs"
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 500d38c5ed932d6c9c951c3bc60a90a54e4ab2a8
