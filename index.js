@@ -13,7 +13,9 @@ const Database = require('better-sqlite3');
 const express = require('express');
 
 const TOKEN = process.env.TOKEN;
-const CAR_CHANNEL_ID = "1492541035530686596";
+
+// 🚗 CHANNEL GIAM XE (ID bạn đưa)
+const CAR_CHANNEL_ID = "1500703920992030731";
 
 // ===== BOT =====
 const client = new Client({
@@ -25,7 +27,6 @@ const client = new Client({
 });
 
 const db = new Database('data.db');
-
 let menuMessage = null;
 
 // ===== ROLE =====
@@ -53,7 +54,7 @@ function getVNTime(ts) {
   });
 }
 
-// ===== X2 BAN ĐÊM =====
+// ===== X2 ĐÊM =====
 function calcDurationWithNightBonus(start, end) {
   let total = 0;
   let current = start;
@@ -95,7 +96,6 @@ CREATE TABLE IF NOT EXISTS pending (
 )
 `).run();
 
-// 🚗 XE THEO NGƯỜI
 db.prepare(`
 CREATE TABLE IF NOT EXISTS cars (
   user_id TEXT
@@ -166,6 +166,7 @@ client.on('interactionCreate', async (i) => {
     return i.reply({ content: '📸 GỬI ẢNH KẾT THÚC', ephemeral: true });
   }
 
+  // 📊 TỔNG GIỜ (CÔNG KHAI)
   if (i.customId === 'tong') {
     const rows = db.prepare(`
       SELECT user_id, SUM(duration) as total
@@ -187,16 +188,15 @@ client.on('interactionCreate', async (i) => {
           .setDescription(text || 'Không có dữ liệu')
           .addFields({ name: 'Tổng', value: formatTime(total) })
       ],
-      ephemeral: true
+      ephemeral: false
     });
   }
 
-  // 🚗 TỔNG XE
+  // 🚗 TỔNG XE (CÔNG KHAI)
   if (i.customId === 'cars') {
     const rows = db.prepare(`
       SELECT user_id, COUNT(*) as total
-      FROM cars
-      GROUP BY user_id
+      FROM cars GROUP BY user_id
     `).all();
 
     let text = '';
@@ -211,7 +211,7 @@ client.on('interactionCreate', async (i) => {
           .setTitle('🚗 TỔNG XE GIAM')
           .setDescription(text || 'Không có dữ liệu')
       ],
-      ephemeral: true
+      ephemeral: false
     });
   }
 
@@ -224,34 +224,8 @@ client.on('interactionCreate', async (i) => {
     db.prepare(`DELETE FROM shifts`).run();
     db.prepare(`DELETE FROM cars`).run();
 
-    return i.reply({ content: "🔁 Đã reset toàn bộ (ca + xe)", ephemeral: true });
+    return i.reply({ content: "🔁 Đã reset toàn bộ", ephemeral: false });
   }
-});
-
-// ===== ADD GIỜ =====
-client.on('messageCreate', async (msg) => {
-  if (msg.author.bot) return;
-  if (!msg.content.startsWith('!add')) return;
-  if (!hasPermission(msg.member)) return;
-
-  const args = msg.content.split(' ');
-  const user = msg.mentions.users.first();
-  const hours = parseFloat(args[2]);
-
-  if (!user || isNaN(hours) || hours <= 0) {
-    return msg.reply("❌ Dùng: !add @user 3");
-  }
-
-  const endTime = Date.now();
-  const startTime = endTime - (hours * 60 * 60 * 1000);
-  const duration = calcDurationWithNightBonus(startTime, endTime);
-
-  db.prepare(`
-    INSERT INTO shifts (user_id, start_time, end_time, duration)
-    VALUES (?, ?, ?, ?)
-  `).run(user.id, startTime, endTime, duration);
-
-  msg.reply(`✅ Đã thêm ${hours} giờ cho <@${user.id}>`);
 });
 
 // ===== HANDLE ẢNH =====
@@ -282,6 +256,10 @@ client.on('messageCreate', async (msg) => {
       .setImage(attachment?.url || null);
 
     msg.channel.send({ embeds: [embed] });
+
+    // 🧹 XOÁ ẢNH
+    msg.delete().catch(() => {});
+
     updateBotStatus();
   }
 
@@ -314,18 +292,25 @@ client.on('messageCreate', async (msg) => {
       .setImage(attachment?.url || null);
 
     msg.channel.send({ embeds: [embed] });
+
+    // 🧹 XOÁ ẢNH
+    msg.delete().catch(() => {});
+
     updateBotStatus();
   }
 });
 
-// ===== 🚗 ĐẾM XE (CHỈ TÍNH KHI CÓ ẢNH) =====
+// ===== 🚗 ĐẾM XE =====
 client.on('messageCreate', async (msg) => {
   if (msg.author.bot) return;
 
-  if (msg.channel.id === CAR_CHANNEL_ID && msg.attachments.size > 0) {
-    db.prepare(`INSERT INTO cars (user_id) VALUES (?)`)
-      .run(msg.author.id);
-  }
+  if (msg.channel.id !== CAR_CHANNEL_ID) return;
+  if (msg.attachments.size === 0) return;
+
+  db.prepare(`INSERT INTO cars (user_id) VALUES (?)`)
+    .run(msg.author.id);
+
+  console.log(`+1 xe: ${msg.author.username}`);
 });
 
 // ===== READY =====
