@@ -1,14 +1,15 @@
 {
-  "name": "discord-bot",
+  "name": "lspd-bot",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "discord.js": "^14.0.0",
-    "better-sqlite3": "^9.0.0",
-    "express": "^4.18.2",
-    "dotenv": "^16.0.0"
+    "@discordjs/voice": "^0.17.0",
+    "better-sqlite3": "^9.4.3",
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
   }
 }
