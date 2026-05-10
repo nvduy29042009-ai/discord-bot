@@ -147,7 +147,7 @@ async function updateBotStatus() {
   const count = getOnDutyCount();
 
   client.user.setActivity({
-    name: `${count} PD đang trực`,
+    name: `! ${count} PD đang trực`,
     type: 3
   });
 
@@ -161,7 +161,7 @@ async function updateBotStatus() {
 
     if (!me) return;
 
-    await me.setNickname(`🎧 ${count} PD ĐANG TRỰC`);
+    await me.setNickname(`!🎧 ${count} PD ĐANG TRỰC`);
 
   } catch (err) {
     console.log(err);
