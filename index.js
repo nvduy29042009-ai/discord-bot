@@ -701,20 +701,35 @@ client.once('ready', async () => {
 
     const guild = client.guilds.cache.first();
 
+    if (!guild) {
+      console.log('❌ KHÔNG TÌM THẤY SERVER');
+      return;
+    }
+
+    const channel = guild.channels.cache.get(BOT_VOICE_CHANNEL_ID);
+
+    if (!channel) {
+      console.log('❌ KHÔNG TÌM THẤY ROOM VOICE');
+      return;
+    }
+
     joinVoiceChannel({
       channelId: BOT_VOICE_CHANNEL_ID,
       guildId: guild.id,
       adapterCreator: guild.voiceAdapterCreator,
-      selfDeaf: true
+      selfDeaf: false,
+      selfMute: true
     });
 
-    console.log('🎧 BOT ĐÃ VÀO VOICE');
+    console.log(`🎧 BOT ĐÃ VÀO: ${channel.name}`);
 
   } catch (err) {
+
+    console.log('❌ VOICE ERROR');
+
     console.log(err);
   }
 });
-
 // ===== SERVER =====
 const app = express();
 
